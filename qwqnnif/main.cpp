@@ -402,7 +402,9 @@ int main() {
         if (command != Command::None) {
             game.handleCommand(command);
             game.render();
-            next_move = std::chrono::steady_clock::now() + std::chrono::milliseconds(kMoveDelayMs);
+            if (command == Command::Restart) {
+                next_move = std::chrono::steady_clock::now() + std::chrono::milliseconds(kMoveDelayMs);
+            }
         }
 
         const auto now = std::chrono::steady_clock::now();
