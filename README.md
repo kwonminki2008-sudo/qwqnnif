@@ -53,8 +53,9 @@ Source/
 
 1. `Qwqnnif.uproject`를 Unreal Engine 5.7로 엽니다.
 2. C++ 프로젝트 파일을 생성하고 빌드합니다.
-3. 테스트 맵을 만들고 바닥, `NavMeshBoundsVolume`, 조명, PlayerStart를 배치합니다.
-4. `ADuelPlayerCharacter`, `ADuelEnemyCharacter` 기반 블루프린트를 만들어 메시/애니메이션을 연결합니다.
-5. GameMode의 EnemyClass를 적 블루프린트로 바꾸면 같은 C++ AI 로직을 유지한 채 외형만 교체할 수 있습니다.
+3. 프로젝트 폴더는 `Downloads`나 `OneDrive`가 아닌 `C:\UnrealProjects\Qwqnnif` 같은 로컬 폴더에 두는 것을 권장합니다.
+4. 테스트 맵을 만들고 바닥, `NavMeshBoundsVolume`, 조명, PlayerStart를 배치합니다.
+5. `ADuelPlayerCharacter`, `ADuelEnemyCharacter` 기반 블루프린트를 만들어 메시/애니메이션을 연결합니다.
+6. GameMode의 EnemyClass를 적 블루프린트로 바꾸면 같은 C++ AI 로직을 유지한 채 외형만 교체할 수 있습니다.
 
 > 적 추적에는 네비게이션이 필요하므로 맵에 `NavMeshBoundsVolume`을 꼭 추가하세요.
