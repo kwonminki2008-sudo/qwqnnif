@@ -1,0 +1,13 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.7",
+	"Category": "Games",
+	"Description": "Simple one-vs-one C++ duel prototype with enemy AI.",
+	"Modules": [
+		{
+			"Name": "Qwqnnif",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
