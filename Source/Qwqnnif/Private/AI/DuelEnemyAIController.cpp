@@ -55,7 +55,11 @@ void ADuelEnemyAIController::Tick(float DeltaSeconds)
 		return;
 	}
 
-	MoveToActor(TargetPawn, ControlledEnemy->GetAttackRange() * 0.75f, true);
+	StopMovement();
+
+	const FVector ToTarget = TargetPawn->GetActorLocation() - ControlledEnemy->GetActorLocation();
+	const FVector DirectionToTarget = FVector(ToTarget.X, ToTarget.Y, 0.0f).GetSafeNormal();
+	ControlledEnemy->AddMovementInput(DirectionToTarget, 1.0f);
 }
 
 APawn* ADuelEnemyAIController::FindTargetPawn() const

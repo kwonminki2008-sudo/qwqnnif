@@ -4,7 +4,12 @@
 #include "Characters/DuelEnemyCharacter.h"
 #include "Characters/DuelPlayerCharacter.h"
 #include "Combat/HealthComponent.h"
+#include "Components/LightComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/DirectionalLight.h"
 #include "Engine/Engine.h"
+#include "Engine/SkyLight.h"
+#include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -18,8 +23,53 @@ void ADuelGameMode::StartPlay()
 {
 	Super::StartPlay();
 
+	SpawnDefaultArenaIfNeeded();
 	RegisterCombatant(UGameplayStatics::GetPlayerPawn(this, 0));
 	SpawnEnemyIfNeeded();
+}
+
+void ADuelGameMode::SpawnDefaultArenaIfNeeded()
+{
+	UWorld* World = GetWorld();
+	if (!World || !bSpawnDefaultArena)
+	{
+		return;
+	}
+
+	for (TActorIterator<AStaticMeshActor> MeshIt(World); MeshIt; ++MeshIt)
+	{
+		if (MeshIt->GetStaticMeshComponent() && MeshIt->GetStaticMeshComponent()->GetStaticMesh())
+		{
+			return;
+		}
+	}
+
+	UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (CubeMesh)
+	{
+		AStaticMeshActor* Floor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), ArenaFloorLocation, FRotator::ZeroRotator);
+		if (Floor && Floor->GetStaticMeshComponent())
+		{
+			Floor->SetActorScale3D(ArenaFloorScale);
+			Floor->GetStaticMeshComponent()->SetStaticMesh(CubeMesh);
+			Floor->GetStaticMeshComponent()->SetCollisionProfileName(TEXT("BlockAll"));
+		}
+	}
+
+	ADirectionalLight* DirectionalLight = World->SpawnActor<ADirectionalLight>(
+		ADirectionalLight::StaticClass(),
+		FVector(0.0f, 0.0f, 700.0f),
+		FRotator(-45.0f, -35.0f, 0.0f));
+	if (DirectionalLight && DirectionalLight->GetLightComponent())
+	{
+		DirectionalLight->GetLightComponent()->SetIntensity(4.0f);
+	}
+
+	ASkyLight* SkyLight = World->SpawnActor<ASkyLight>(ASkyLight::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator);
+	if (SkyLight && SkyLight->GetLightComponent())
+	{
+		SkyLight->GetLightComponent()->SetIntensity(1.0f);
+	}
 }
 
 void ADuelGameMode::SpawnEnemyIfNeeded()

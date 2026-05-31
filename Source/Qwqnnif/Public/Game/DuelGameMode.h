@@ -23,7 +23,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel")
 	FVector EnemySpawnOffset = FVector(700.0f, 0.0f, 100.0f);
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|Arena")
+	bool bSpawnDefaultArena = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|Arena")
+	FVector ArenaFloorLocation = FVector(0.0f, 0.0f, -110.0f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|Arena")
+	FVector ArenaFloorScale = FVector(20.0f, 20.0f, 0.2f);
+
 private:
+	void SpawnDefaultArenaIfNeeded();
 	void SpawnEnemyIfNeeded();
 	void RegisterCombatant(AActor* Combatant);
 

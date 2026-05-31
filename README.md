@@ -49,13 +49,14 @@ Source/
 - `UHealthComponent`
   - 데미지 수신, 체력 감소, 사망 이벤트를 담당합니다.
 
-## 에디터에서 이어서 할 일
+## 에디터에서 바로 테스트하기
 
 1. `Qwqnnif.uproject`를 Unreal Engine 5.7로 엽니다.
 2. C++ 프로젝트 파일을 생성하고 빌드합니다.
 3. 프로젝트 폴더는 `Downloads`나 `OneDrive`가 아닌 `C:\UnrealProjects\Qwqnnif` 같은 로컬 폴더에 두는 것을 권장합니다.
-4. 테스트 맵을 만들고 바닥, `NavMeshBoundsVolume`, 조명, PlayerStart를 배치합니다.
-5. `ADuelPlayerCharacter`, `ADuelEnemyCharacter` 기반 블루프린트를 만들어 메시/애니메이션을 연결합니다.
-6. GameMode의 EnemyClass를 적 블루프린트로 바꾸면 같은 C++ AI 로직을 유지한 채 외형만 교체할 수 있습니다.
+4. 저장하지 말고 기본 `Entry` 맵에서 바로 Play를 눌러도 됩니다. 게임 모드가 실행 중에 바닥, 조명, 적을 자동 생성합니다.
+5. 나중에 맵을 직접 저장하고 싶다면 `파일 > 새 레벨`로 새 레벨을 만든 뒤 `Content/Maps`에 저장하세요. `/Engine/Maps/Entry`를 그대로 다른 이름으로 저장하면 Unreal 내부 맵 참조 오류가 날 수 있습니다.
+6. `ADuelPlayerCharacter`, `ADuelEnemyCharacter` 기반 블루프린트를 만들어 메시/애니메이션을 연결합니다.
+7. GameMode의 EnemyClass를 적 블루프린트로 바꾸면 같은 C++ AI 로직을 유지한 채 외형만 교체할 수 있습니다.
 
-> 적 추적에는 네비게이션이 필요하므로 맵에 `NavMeshBoundsVolume`을 꼭 추가하세요.
+> 현재 적 추적은 초보 테스트가 쉽도록 NavMesh 없이 플레이어 방향으로 직접 이동합니다. 나중에 제대로 된 레벨을 만들면 `NavMeshBoundsVolume` 기반 AI 이동으로 바꿀 수 있습니다.
