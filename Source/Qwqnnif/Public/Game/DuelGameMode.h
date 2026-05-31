@@ -27,10 +27,10 @@ protected:
 	bool bSpawnDefaultArena = true;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|Arena")
-	FVector ArenaFloorLocation = FVector(0.0f, 0.0f, -110.0f);
+	FVector ArenaFloorLocation = FVector(0.0f, 0.0f, -100.0f);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Duel|Arena")
-	FVector ArenaFloorScale = FVector(20.0f, 20.0f, 0.2f);
+	FVector ArenaFloorScale = FVector(30.0f, 30.0f, 0.2f);
 
 private:
 	void SpawnDefaultArenaIfNeeded();

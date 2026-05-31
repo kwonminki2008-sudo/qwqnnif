@@ -8,12 +8,34 @@ ADuelPlayerCharacter::ADuelPlayerCharacter()
 {
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 450.0f;
+	CameraBoom->TargetArmLength = 650.0f;
+	CameraBoom->SetRelativeLocation(FVector(0.0f, 0.0f, 140.0f));
+	CameraBoom->SetRelativeRotation(FRotator(-25.0f, 0.0f, 0.0f));
 	CameraBoom->bUsePawnControlRotation = true;
 
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
+}
+
+void ADuelPlayerCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (Controller)
+	{
+		Controller->SetControlRotation(FRotator(-25.0f, 0.0f, 0.0f));
+	}
+}
+
+void ADuelPlayerCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+
+	if (NewController)
+	{
+		NewController->SetControlRotation(FRotator(-25.0f, 0.0f, 0.0f));
+	}
 }
 
 void ADuelPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

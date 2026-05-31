@@ -2,9 +2,11 @@
 
 #include "Combat/HealthComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/DamageType.h"
 #include "Kismet/GameplayStatics.h"
+#include "UObject/ConstructorHelpers.h"
 
 ADuelCharacterBase::ADuelCharacterBase()
 {
@@ -21,6 +23,18 @@ ADuelCharacterBase::ADuelCharacterBase()
 	GetCharacterMovement()->MaxWalkSpeed = 500.0f;
 
 	HealthComponent = CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
+
+	BodyMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BodyMesh"));
+	BodyMesh->SetupAttachment(RootComponent);
+	BodyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BodyMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -20.0f));
+	BodyMesh->SetRelativeScale3D(FVector(0.75f, 0.75f, 1.4f));
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> BodyMeshAsset(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	if (BodyMeshAsset.Succeeded())
+	{
+		BodyMesh->SetStaticMesh(BodyMeshAsset.Object);
+	}
 }
 
 void ADuelCharacterBase::BeginPlay()

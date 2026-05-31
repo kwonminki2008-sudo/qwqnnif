@@ -6,6 +6,7 @@
 
 class UDamageType;
 class UHealthComponent;
+class UStaticMeshComponent;
 
 UCLASS(Abstract)
 class QWQNNIF_API ADuelCharacterBase : public ACharacter
@@ -35,6 +36,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UHealthComponent> HealthComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UStaticMeshComponent> BodyMesh;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat", meta = (ClampMin = "0.0"))
 	float AttackDamage = 25.0f;

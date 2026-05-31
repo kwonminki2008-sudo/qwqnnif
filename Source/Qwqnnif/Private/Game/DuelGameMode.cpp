@@ -12,6 +12,7 @@
 #include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInterface.h"
 
 ADuelGameMode::ADuelGameMode()
 {
@@ -45,6 +46,7 @@ void ADuelGameMode::SpawnDefaultArenaIfNeeded()
 	}
 
 	UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	UMaterialInterface* FloorMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	if (CubeMesh)
 	{
 		AStaticMeshActor* Floor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), ArenaFloorLocation, FRotator::ZeroRotator);
@@ -52,6 +54,10 @@ void ADuelGameMode::SpawnDefaultArenaIfNeeded()
 		{
 			Floor->SetActorScale3D(ArenaFloorScale);
 			Floor->GetStaticMeshComponent()->SetStaticMesh(CubeMesh);
+			if (FloorMaterial)
+			{
+				Floor->GetStaticMeshComponent()->SetMaterial(0, FloorMaterial);
+			}
 			Floor->GetStaticMeshComponent()->SetCollisionProfileName(TEXT("BlockAll"));
 		}
 	}
@@ -62,13 +68,13 @@ void ADuelGameMode::SpawnDefaultArenaIfNeeded()
 		FRotator(-45.0f, -35.0f, 0.0f));
 	if (DirectionalLight && DirectionalLight->GetLightComponent())
 	{
-		DirectionalLight->GetLightComponent()->SetIntensity(4.0f);
+		DirectionalLight->GetLightComponent()->SetIntensity(8.0f);
 	}
 
 	ASkyLight* SkyLight = World->SpawnActor<ASkyLight>(ASkyLight::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator);
 	if (SkyLight && SkyLight->GetLightComponent())
 	{
-		SkyLight->GetLightComponent()->SetIntensity(1.0f);
+		SkyLight->GetLightComponent()->SetIntensity(2.0f);
 	}
 }
 
@@ -100,6 +106,11 @@ void ADuelGameMode::SpawnEnemyIfNeeded()
 
 	ADuelEnemyCharacter* SpawnedEnemy = World->SpawnActor<ADuelEnemyCharacter>(EnemyClass, SpawnLocation, SpawnRotation, SpawnParams);
 	RegisterCombatant(SpawnedEnemy);
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(INDEX_NONE, 6.0f, FColor::Yellow, TEXT("Duel prototype started: WASD move, mouse look, Space/Left Click attack."));
+	}
 }
 
 void ADuelGameMode::RegisterCombatant(AActor* Combatant)
