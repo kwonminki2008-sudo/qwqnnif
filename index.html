@@ -167,7 +167,8 @@
       separationPadding: 4,
       angleJitter: 0.14,
       wallAngleJitter: 0.08,
-      hitCooldownMs: 580
+      hitCooldownMs: 580,
+      ninjaWallBounceCooldownMs: 320
     };
 
     const ABILITY = {
@@ -195,7 +196,8 @@
       collisionDuration: 1000,
       collisionSpeedMultiplier: 2,
       arrowSpeed: 1320,
-      ninjaInterval: 6000,
+      ninjaInterval: 8000,
+      ninjaWallCooldownReduction: 1000,
       ninjaDashDuration: 220,
       ninjaDashSpeed: 2200,
       ninjaSlashDamage: 18,
@@ -206,11 +208,19 @@
       frostPrisonDamage: 14,
       frostSlowDuration: 2000,
       frostSlowMultiplier: 0.5,
+      frostAuraRadius: 52,
+      frostAuraDamagePerSecond: 1,
+      frostAuraSlowMultiplier: 0.7,
       bomberInterval: 5000,
       bomberFuseDuration: 1200,
       bomberExplosionRadius: 88,
       bomberExplosionDamage: 22,
-      bomberKnockback: 520
+      bomberKnockback: 520,
+      lancerInterval: 6500,
+      lancerThrustDuration: 800,
+      lancerThrustDamage: 18,
+      lancerThrustKnockback: 450,
+      lancerThrustReach: 42
     };
 
     // ===== EDIT CHARACTERS HERE ONLY =====
@@ -328,7 +338,7 @@
         hp: 40,
         baseDamage: 7,
         abilityName: "SHADOW SLASH",
-        abilityCooldown: 6000,
+        abilityCooldown: 8000,
         abilityType: "ninja",
         ballColor: "#2b2b2b",
         weaponType: "katana",
@@ -380,6 +390,26 @@
         weaponOffsetY: 0,
         radius: 60,
         speed: 10
+      },
+      {
+        id: "lancer",
+        name: "Lancer",
+        teamColor: "#34495e",
+        hp: 55,
+        baseDamage: 6,
+        abilityName: "PIERCING THRUST",
+        abilityCooldown: 6500,
+        abilityType: "lancer",
+        ballColor: "#3d5a80",
+        weaponType: "spear",
+        weaponColor: "#bdc3c7",
+        weaponImage: "spear",
+        ballImage: null,
+        weaponScale: 2.0,
+        weaponOffsetX: 6,
+        weaponOffsetY: 0,
+        radius: 60,
+        speed: 11
       }
     ];
     // ===== END CHARACTERS =====
@@ -519,6 +549,8 @@
       let scale = getSpeedStatScale(ball.moveSpeed ?? PHYSICS.SPEED_STAT_BASELINE);
       if (ball.slowTimeLeft > 0) {
         scale *= ABILITY.frostSlowMultiplier;
+      } else if (ball.auraSlowActive) {
+        scale *= ABILITY.frostAuraSlowMultiplier;
       }
       if (ball.collisionEffectTimeLeft > 0) {
         scale *= ABILITY.collisionSpeedMultiplier;
@@ -741,6 +773,8 @@
       if (options.bleedTick) {
         spawnBleedDamageNumber(victim, actual);
         spawnBloodDrop(victim.x, victim.y);
+      } else if (options.auraTick) {
+        spawnAuraDamageNumber(victim, actual);
       } else if (options.lightning) {
         spawnLightningDamageNumber(victim, actual);
       } else if (options.damageNumber !== false) {
@@ -805,6 +839,19 @@
         vy: -120,
         life: 900,
         scale: 0.72
+      });
+    }
+
+    function spawnAuraDamageNumber(victim, amount) {
+      damageNumbers.push({
+        x: victim.x + rand(-8, 8),
+        y: victim.y - victim.radius * 0.22,
+        text: "-" + Math.round(amount),
+        color: "#85c1e9",
+        alpha: 1,
+        vy: -90,
+        life: 800,
+        scale: 0.68
       });
     }
 
@@ -1071,6 +1118,64 @@
 
     function applySlow(ball) {
       ball.slowTimeLeft = ABILITY.frostSlowDuration;
+    }
+
+    function updateFrostAuras(dt) {
+      if (gameOver) return;
+      for (const ball of balls) {
+        ball.auraSlowActive = false;
+      }
+      for (const frost of balls) {
+        if (frost.ability !== "frost" || frost.hp <= 0) continue;
+        const opponent = balls.find((b) => b !== frost);
+        if (!opponent || opponent.hp <= 0) continue;
+        const dist = Math.hypot(opponent.x - frost.x, opponent.y - frost.y);
+        const inAura = dist <= ABILITY.frostAuraRadius + opponent.radius * 0.28;
+        if (!inAura) {
+          opponent.frostAuraTickTimer = 0;
+          continue;
+        }
+        opponent.auraSlowActive = true;
+        opponent.frostAuraTickTimer += dt * 1000;
+        if (opponent.frostAuraTickTimer >= 1000) {
+          opponent.frostAuraTickTimer -= 1000;
+          applyDamage(opponent, frost, ABILITY.frostAuraDamagePerSecond, { auraTick: true });
+        }
+      }
+    }
+
+    function pointToSegmentDist(px, py, x1, y1, x2, y2) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+      let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+      t = clamp(t, 0, 1);
+      return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+    }
+
+    function checkLancerThrustHit(lancer) {
+      if (!lancer.thrustActive || lancer.thrustHit) return;
+      const opponent = balls.find((b) => b !== lancer);
+      if (!opponent || opponent.hp <= 0) return;
+      const angle = lancer.weaponAngle;
+      const start = lancer.radius * 0.35;
+      const end = lancer.radius + lancer.weaponOffsetX + ABILITY.lancerThrustReach;
+      const sx = lancer.x + Math.cos(angle) * start;
+      const sy = lancer.y + Math.sin(angle) * start;
+      const ex = lancer.x + Math.cos(angle) * end;
+      const ey = lancer.y + Math.sin(angle) * end;
+      if (pointToSegmentDist(opponent.x, opponent.y, sx, sy, ex, ey) > opponent.radius + 10) return;
+      lancer.thrustHit = true;
+      applyDamage(opponent, lancer, ABILITY.lancerThrustDamage);
+      const dx = opponent.x - lancer.x;
+      const dy = opponent.y - lancer.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      opponent.vx += (dx / dist) * ABILITY.lancerThrustKnockback;
+      opponent.vy += (dy / dist) * ABILITY.lancerThrustKnockback;
+      enforceSpeedLimits(opponent);
+      slashEffects.push({ x: opponent.x, y: opponent.y, life: 240, alpha: 1, stab: true });
+      spawnImpactFlash(opponent.x, opponent.y, 34, "#ffd700");
     }
 
     function startNinjaDash(ninja, opponent) {
@@ -1384,6 +1489,20 @@
           ctx.moveTo(s.x + 14, s.y - 14);
           ctx.lineTo(s.x - 16, s.y + 12);
           ctx.stroke();
+        } else if (s.stab) {
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(s.x - 14, s.y);
+          ctx.lineTo(s.x + 16, s.y);
+          ctx.stroke();
+          ctx.strokeStyle = "#ffd700";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(s.x + 10, s.y - 10);
+          ctx.lineTo(s.x + 18, s.y);
+          ctx.lineTo(s.x + 10, s.y + 10);
+          ctx.stroke();
         } else {
           ctx.strokeStyle = "#fff";
           ctx.lineWidth = 4;
@@ -1430,6 +1549,39 @@
       ctx.strokeStyle = "#95a5a6";
       ctx.lineWidth = 0.8;
       ctx.strokeRect(-1, -12, 2, 10);
+      ctx.restore();
+    }
+
+    function drawSpear(x, y, scale, extended) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-0.15);
+      ctx.scale(scale, scale);
+      const len = extended ? 22 : 16;
+      ctx.strokeStyle = "#5c3a1e";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(0, 4);
+      ctx.lineTo(0, -len);
+      ctx.stroke();
+      ctx.fillStyle = "#bdc3c7";
+      ctx.beginPath();
+      ctx.moveTo(0, -len - 2);
+      ctx.lineTo(-2.5, -len + 5);
+      ctx.lineTo(2.5, -len + 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#95a5a6";
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+      if (extended) {
+        ctx.strokeStyle = "rgba(255, 215, 0, 0.65)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(0, 2);
+        ctx.lineTo(0, -len);
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -1768,7 +1920,7 @@
         this.trail = [];
         this.collisionCooldown = 0;
         this.abilityCooldown = config.abilityCooldown ?? 0;
-        const cdAbilities = ["ironMining", "scissorhands", "paladin", "ninja", "frost", "bomber"];
+        const cdAbilities = ["ironMining", "scissorhands", "paladin", "ninja", "frost", "bomber", "lancer"];
         this.abilityTimer = cdAbilities.includes(config.ability) ? this.abilityCooldown : 0;
         this.ironMiningActive = false;
         this.ironMiningTimeLeft = 0;
@@ -1786,6 +1938,12 @@
         this.shadowDashTimeLeft = 0;
         this.shadowDashHit = false;
         this.slowTimeLeft = 0;
+        this.auraSlowActive = false;
+        this.frostAuraTickTimer = 0;
+        this.ninjaWallBounceCooldown = 0;
+        this.thrustActive = false;
+        this.thrustTimeLeft = 0;
+        this.thrustHit = false;
         this.awakenedEyeTimeLeft = 0;
         this.paralyzedTimeLeft = 0;
         this.savedVx = 0;
@@ -1797,6 +1955,12 @@
       get damageMultiplier() {
         if (this.ironMiningActive) return ABILITY.ironMiningDamageMultiplier;
         return 1;
+      }
+
+      onNinjaWallBounce() {
+        if (this.ability !== "ninja" || this.abilityTimer <= 0 || this.ninjaWallBounceCooldown > 0) return;
+        this.abilityTimer = Math.max(0, this.abilityTimer - ABILITY.ninjaWallCooldownReduction);
+        this.ninjaWallBounceCooldown = PHYSICS.ninjaWallBounceCooldownMs;
       }
 
       bounceOffWalls() {
@@ -1811,11 +1975,13 @@
           this.vx = Math.abs(this.vx) * e;
           this.vy += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
           triggerScreenShake(4, 80);
+          this.onNinjaWallBounce();
         } else if (this.x > right) {
           this.x = right;
           this.vx = -Math.abs(this.vx) * e;
           this.vy += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
           triggerScreenShake(4, 80);
+          this.onNinjaWallBounce();
         }
 
         if (this.y < top) {
@@ -1823,11 +1989,13 @@
           this.vy = Math.abs(this.vy) * e;
           this.vx += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
           triggerScreenShake(4, 80);
+          this.onNinjaWallBounce();
         } else if (this.y > bottom) {
           this.y = bottom;
           this.vy = -Math.abs(this.vy) * e;
           this.vx += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
           triggerScreenShake(4, 80);
+          this.onNinjaWallBounce();
         }
 
         if (!this.shadowDashActive) {
@@ -1896,6 +2064,11 @@
 
         if (this.collisionCooldown > 0) {
           this.collisionCooldown -= dt * 1000;
+        }
+
+        if (this.ninjaWallBounceCooldown > 0) {
+          this.ninjaWallBounceCooldown -= dt * 1000;
+          if (this.ninjaWallBounceCooldown < 0) this.ninjaWallBounceCooldown = 0;
         }
 
         if (this.ability === "ironMining") {
@@ -1998,6 +2171,24 @@
             this.abilityTimer = ABILITY.bomberInterval;
             spawnTimeBomb(this);
             spawnTextEffect(this.x, this.y - this.radius - 40, "TIME BOMB!", "#e67e22", 34);
+          }
+        }
+
+        if (this.ability === "lancer") {
+          this.abilityTimer -= dt * 1000;
+          if (this.thrustActive) {
+            this.thrustTimeLeft -= dt * 1000;
+            checkLancerThrustHit(this);
+            if (this.thrustTimeLeft <= 0) {
+              this.thrustActive = false;
+            }
+          }
+          if (this.abilityTimer <= 0 && !this.thrustActive) {
+            this.abilityTimer = ABILITY.lancerInterval;
+            this.thrustActive = true;
+            this.thrustTimeLeft = ABILITY.lancerThrustDuration;
+            this.thrustHit = false;
+            spawnTextEffect(this.x, this.y - this.radius - 40, "PIERCING THRUST!", "#f1c40f", 34);
           }
         }
 
@@ -2111,18 +2302,63 @@
       }
 
       drawSlowEffect() {
-        if (this.slowTimeLeft <= 0) return;
-        ctx.save();
-        const pulse = 0.35 + Math.sin(this.glowPhase * 4) * 0.15;
-        ctx.globalAlpha = pulse;
-        for (let i = 0; i < 4; i++) {
-          const angle = this.glowPhase * 2 + (i / 4) * Math.PI * 2;
-          const dist = this.radius + 5 + Math.sin(this.glowPhase * 3 + i) * 2;
-          ctx.fillStyle = "rgba(174, 214, 241, 0.75)";
-          ctx.beginPath();
-          ctx.arc(this.x + Math.cos(angle) * dist, this.y + Math.sin(angle) * dist, 2.5, 0, Math.PI * 2);
-          ctx.fill();
+        if (this.slowTimeLeft > 0) {
+          ctx.save();
+          const pulse = 0.35 + Math.sin(this.glowPhase * 4) * 0.15;
+          ctx.globalAlpha = pulse;
+          for (let i = 0; i < 4; i++) {
+            const angle = this.glowPhase * 2 + (i / 4) * Math.PI * 2;
+            const dist = this.radius + 5 + Math.sin(this.glowPhase * 3 + i) * 2;
+            ctx.fillStyle = "rgba(174, 214, 241, 0.75)";
+            ctx.beginPath();
+            ctx.arc(this.x + Math.cos(angle) * dist, this.y + Math.sin(angle) * dist, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        } else if (this.auraSlowActive) {
+          ctx.save();
+          ctx.globalAlpha = 0.28 + Math.sin(this.glowPhase * 3) * 0.1;
+          for (let i = 0; i < 3; i++) {
+            const angle = this.glowPhase * 1.5 + (i / 3) * Math.PI * 2;
+            const dist = this.radius + 4;
+            ctx.fillStyle = "rgba(133, 193, 233, 0.6)";
+            ctx.beginPath();
+            ctx.arc(this.x + Math.cos(angle) * dist, this.y + Math.sin(angle) * dist, 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
         }
+      }
+
+      drawFrostAura() {
+        if (this.ability !== "frost" || this.hp <= 0) return;
+        ctx.save();
+        const pulse = 0.22 + Math.sin(this.glowPhase * 2.5) * 0.08;
+        ctx.globalAlpha = pulse;
+        ctx.strokeStyle = "#85c1e9";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, ABILITY.frostAuraRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(174, 214, 241, 0.08)";
+        ctx.fill();
+        ctx.restore();
+      }
+
+      drawLancerHelmet() {
+        if (this.ability !== "lancer") return;
+        const r = this.radius;
+        ctx.save();
+        ctx.fillStyle = "#7f8c8d";
+        ctx.beginPath();
+        ctx.arc(this.x, this.y - r * 0.2, r * 0.5, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "#2c3e50";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = "#1a252f";
+        ctx.fillRect(this.x - r * 0.22, this.y - r * 0.08, r * 0.44, r * 0.1);
         ctx.restore();
       }
 
@@ -2303,10 +2539,12 @@
         }
 
         this.drawNinjaHeadband();
+        this.drawFrostAura();
         this.drawFrostDetails();
         this.drawBomberDetails();
         this.drawFace();
         this.drawPaladinHelmet();
+        this.drawLancerHelmet();
         if (this.shadowDashActive) {
           ctx.beginPath();
           ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.glowPhase * 5) * 3, 0, Math.PI * 2);
@@ -2332,6 +2570,14 @@
           ctx.arc(this.x, this.y, this.radius + 10 + Math.sin(this.glowPhase * 3) * 3, 0, Math.PI * 2);
           ctx.strokeStyle = `rgba(231, 76, 60, ${0.55 + Math.sin(this.glowPhase * 4) * 0.2})`;
           ctx.lineWidth = 5;
+          ctx.stroke();
+        }
+
+        if (this.thrustActive) {
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.glowPhase * 5) * 2, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(241, 196, 15, ${0.5 + Math.sin(this.glowPhase * 4) * 0.2})`;
+          ctx.lineWidth = 3;
           ctx.stroke();
         }
 
@@ -2371,6 +2617,8 @@
           drawIceStaff(0, 0, this.weaponScale);
         } else if (this.weapon === "bomb" || this.ability === "bomber") {
           drawHandBomb(0, 0, this.weaponScale);
+        } else if (this.weapon === "spear" || this.ability === "lancer") {
+          drawSpear(0, 0, this.weaponScale, this.thrustActive);
         }
 
         ctx.restore();
@@ -2580,8 +2828,8 @@
         weaponScale: char.weaponScale,
         weaponOffsetX: char.weaponOffsetX,
         weaponOffsetY: char.weaponOffsetY,
-        ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : char.abilityType === "scissorhands" ? "scissorhands" : char.abilityType === "paladin" ? "paladin" : char.abilityType === "ninja" ? "ninja" : char.abilityType === "frost" ? "frost" : char.abilityType === "bomber" ? "bomber" : "normal",
-        abilityCooldown: char.abilityType === "paladin" ? (char.abilityCooldown || ABILITY.paladinInterval) : char.abilityType === "scissorhands" ? (char.abilityCooldown || ABILITY.scissorInterval) : char.abilityType === "ninja" ? (char.abilityCooldown || ABILITY.ninjaInterval) : char.abilityType === "frost" ? (char.abilityCooldown || ABILITY.frostInterval) : char.abilityType === "bomber" ? (char.abilityCooldown || ABILITY.bomberInterval) : char.abilityCooldown || ABILITY.ironMiningInterval,
+        ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : char.abilityType === "scissorhands" ? "scissorhands" : char.abilityType === "paladin" ? "paladin" : char.abilityType === "ninja" ? "ninja" : char.abilityType === "frost" ? "frost" : char.abilityType === "bomber" ? "bomber" : char.abilityType === "lancer" ? "lancer" : "normal",
+        abilityCooldown: char.abilityType === "paladin" ? (char.abilityCooldown || ABILITY.paladinInterval) : char.abilityType === "scissorhands" ? (char.abilityCooldown || ABILITY.scissorInterval) : char.abilityType === "ninja" ? (char.abilityCooldown || ABILITY.ninjaInterval) : char.abilityType === "frost" ? (char.abilityCooldown || ABILITY.frostInterval) : char.abilityType === "bomber" ? (char.abilityCooldown || ABILITY.bomberInterval) : char.abilityType === "lancer" ? (char.abilityCooldown || ABILITY.lancerInterval) : char.abilityCooldown || ABILITY.ironMiningInterval,
         baseDamage: char.baseDamage,
         abilityDamage: char.abilityDamage,
         meleeDamage: char.meleeDamage,
@@ -2905,6 +3153,14 @@
           icon: "bomber"
         };
       }
+      if (ball.ability === "lancer") {
+        return {
+          ready: ball.abilityTimer <= 0 && !ball.thrustActive,
+          remainingMs: Math.max(0, ball.abilityTimer),
+          totalMs: ball.abilityCooldown || ABILITY.lancerInterval,
+          icon: "lancer"
+        };
+      }
       return { ready: true, remainingMs: 0, totalMs: 0, icon: "stick" };
     }
 
@@ -3005,6 +3261,20 @@
         ctx.fillStyle = "#ff9500";
         ctx.beginPath();
         ctx.arc(0, -s * 0.46, s * 0.08, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (icon === "lancer") {
+        ctx.strokeStyle = "#5c3a1e";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, s * 0.35);
+        ctx.lineTo(0, -s * 0.45);
+        ctx.stroke();
+        ctx.fillStyle = "#bdc3c7";
+        ctx.beginPath();
+        ctx.moveTo(0, -s * 0.48);
+        ctx.lineTo(-s * 0.1, -s * 0.32);
+        ctx.lineTo(s * 0.1, -s * 0.32);
+        ctx.closePath();
         ctx.fill();
       } else {
         ctx.strokeStyle = "#5c3a1e";
@@ -3325,6 +3595,7 @@
         updateExcaliburDrops(dt);
         updateIcePrisons(dt);
         updateTimeBombs(dt);
+        updateFrostAuras(dt);
         checkBattleEnd();
       }
 
