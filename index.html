@@ -169,17 +169,19 @@
     const ABILITY = {
       ironMiningInterval: 5000,
       ironMiningDuration: 3000,
-      ironMiningDamageMultiplier: 2.6
+      ironMiningDamageMultiplier: 2,
+      ironMiningDamageReduction: 0.6,
+      lightningDamage: 5
     };
 
     // ===== EDIT CHARACTERS HERE ONLY =====
     const CHARACTERS = [
       {
         id: "green",
-        name: "Green Hammer",
+        name: "Hammer",
         teamColor: "#2ecc40",
-        hp: 41,
-        baseDamage: 5.2,
+        hp: 45,
+        baseDamage: 8,
         abilityName: "IRON MINING",
         abilityCooldown: 5000,
         abilityType: "ironMining",
@@ -195,10 +197,10 @@
       },
       {
         id: "blue",
-        name: "Blue Stick",
+        name: "Stick",
         teamColor: "#0074d9",
-        hp: 95,
-        baseDamage: 3.8,
+        hp: 100,
+        baseDamage: 10,
         abilityName: "NORMAL",
         abilityCooldown: 0,
         abilityType: "normal",
@@ -361,10 +363,19 @@
       screenShake.duration = Math.max(screenShake.duration, duration);
     }
 
-    function computeAttackDamage(attacker, defender) {
-      const relSpeed = Math.hypot(attacker.vx - defender.vx, attacker.vy - defender.vy);
-      const speedBonus = clamp(relSpeed * 0.008, 0, 4);
-      return attacker.baseDamage * attacker.damageMultiplier + speedBonus;
+    function getAttackDamage(attacker) {
+      return Math.round(attacker.baseDamage * attacker.damageMultiplier);
+    }
+
+    function computeReceivedDamage(defender, rawDamage) {
+      if (defender.ironMiningActive && defender.ability === "ironMining") {
+        return Math.max(0, Math.round(rawDamage * (1 - ABILITY.ironMiningDamageReduction)));
+      }
+      return Math.round(rawDamage);
+    }
+
+    function computeHitDamage(attacker, defender) {
+      return computeReceivedDamage(defender, getAttackDamage(attacker));
     }
 
     function spawnDamageNumber(victim, attacker, amount) {
@@ -418,11 +429,11 @@
       });
     }
 
-    function spawnLightningDamageNumber(victim) {
+    function spawnLightningDamageNumber(victim, amount) {
       damageNumbers.push({
         x: victim.x,
         y: victim.y - victim.radius * 0.35,
-        text: "-5",
+        text: "-" + Math.round(amount),
         color: COLORS.ironMining,
         alpha: 1,
         vy: -200,
@@ -449,8 +460,9 @@
         const dist = Math.hypot(dx, dy) || 1;
 
         if (dist <= target.radius + 12) {
-          target.hp -= 5;
-          spawnLightningDamageNumber(target);
+          const lightningDamage = computeReceivedDamage(target, ABILITY.lightningDamage);
+          target.hp -= lightningDamage;
+          spawnLightningDamageNumber(target, lightningDamage);
           spawnElectricEffect(target.x, target.y);
           spawnImpactFlash(target.x, target.y, 52);
           spawnImpactFlash(target.x, target.y, 28);
@@ -679,7 +691,7 @@
         const lookX = clamp(this.vx / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
         const lookY = clamp(this.vy / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
 
-        const awakened = this.ability === "ironMining" && this.awakenedEyeTimeLeft > 0;
+        const awakened = this.ability === "ironMining" && this.ironMiningActive;
         const eyeColor = awakened ? "#fff200" : "#fff";
         const pupilColor = awakened ? "#332200" : "#111";
 
@@ -897,8 +909,8 @@
       const midY = (a.y + b.y) / 2;
 
       if (a.collisionCooldown <= 0 && b.collisionCooldown <= 0) {
-          const damageToB = computeAttackDamage(a, b);
-          const damageToA = computeAttackDamage(b, a);
+          const damageToB = computeHitDamage(a, b);
+          const damageToA = computeHitDamage(b, a);
 
           b.hp -= damageToB;
           a.hp -= damageToA;
@@ -1035,7 +1047,7 @@
       ctx.strokeStyle = COLORS.black;
       ctx.lineWidth = 3;
       const dmgX = isLeft ? x : x + barW;
-      const dmgLabel = "DMG: " + Math.round(computeAttackDamage(ball, opponent));
+      const dmgLabel = "DMG: " + getAttackDamage(ball);
       ctx.strokeText(dmgLabel, dmgX, barY + barH + 34);
       ctx.fillText(dmgLabel, dmgX, barY + barH + 34);
 
@@ -1215,6 +1227,9 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "r" || e.key === "R") {
         if (gamePhase === "battle") initGame();
+      }
+      if (e.key === "Escape" && gamePhase === "battle") {
+        showCharacterSelect();
       }
     });
 
