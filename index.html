@@ -155,6 +155,7 @@
     };
 
     const PHYSICS = {
+      baseMoveSpeed: 10,
       minSpeed: 340,
       maxSpeed: 620,
       wallRestitution: 1.22,
@@ -204,7 +205,8 @@
         weaponScale: 2.2,
         weaponOffsetX: 6,
         weaponOffsetY: 0,
-        radius: 58
+        radius: 58,
+        speed: 11
       },
       {
         id: "blue",
@@ -223,7 +225,8 @@
         weaponScale: 2.4,
         weaponOffsetX: 6,
         weaponOffsetY: 0,
-        radius: 72
+        radius: 72,
+        speed: 10
       },
       {
         id: "archer",
@@ -245,7 +248,8 @@
         weaponOffsetX: 6,
         weaponOffsetY: 0,
         radius: 58,
-        projectileCooldown: 3000
+        projectileCooldown: 3000,
+        speed: 9
       },
       {
         id: "scissorhands",
@@ -266,7 +270,8 @@
         weaponScale: 1.7,
         weaponOffsetX: 4,
         weaponOffsetY: 0,
-        radius: 60
+        radius: 60,
+        speed: 12
       }
     ];
     // ===== END CHARACTERS =====
@@ -391,13 +396,15 @@
     }
 
     function getSpeedLimits(ball) {
+      const baseScale = (ball.moveSpeed || PHYSICS.baseMoveSpeed) / PHYSICS.baseMoveSpeed;
+      let scale = baseScale;
       if (ball.scissorActive) {
-        return {
-          minSpeed: PHYSICS.minSpeed * ABILITY.scissorSpeedMultiplier,
-          maxSpeed: PHYSICS.maxSpeed * ABILITY.scissorSpeedMultiplier
-        };
+        scale *= ABILITY.scissorSpeedMultiplier;
       }
-      return { minSpeed: PHYSICS.minSpeed, maxSpeed: PHYSICS.maxSpeed };
+      return {
+        minSpeed: PHYSICS.minSpeed * scale,
+        maxSpeed: PHYSICS.maxSpeed * scale
+      };
     }
 
     function enforceSpeedLimits(ball) {
@@ -973,6 +980,7 @@
         this.vx = config.vx;
         this.vy = config.vy;
         this.radius = config.radius;
+        this.moveSpeed = config.moveSpeed ?? PHYSICS.baseMoveSpeed;
         this.hp = config.hp;
         this.maxHp = config.hp;
         this.weapon = config.weapon;
@@ -1122,7 +1130,8 @@
               const speed = Math.hypot(this.vx, this.vy);
               if (speed > 1) {
                 const angle = Math.atan2(this.vy, this.vx);
-                const newSpeed = Math.min(speed / ABILITY.scissorSpeedMultiplier, PHYSICS.maxSpeed);
+                const limits = getSpeedLimits(this);
+                const newSpeed = Math.min(speed / ABILITY.scissorSpeedMultiplier, limits.maxSpeed);
                 this.vx = Math.cos(angle) * newSpeed;
                 this.vy = Math.sin(angle) * newSpeed;
               }
@@ -1140,7 +1149,8 @@
             const speed = Math.hypot(this.vx, this.vy);
             if (speed > 1) {
               const angle = Math.atan2(this.vy, this.vx);
-              const newSpeed = Math.min(speed * ABILITY.scissorSpeedMultiplier, PHYSICS.maxSpeed * ABILITY.scissorSpeedMultiplier);
+              const limits = getSpeedLimits(this);
+              const newSpeed = Math.min(speed * ABILITY.scissorSpeedMultiplier, limits.maxSpeed);
               this.vx = Math.cos(angle) * newSpeed;
               this.vy = Math.sin(angle) * newSpeed;
             }
@@ -1185,8 +1195,8 @@
       drawFace() {
         const eyeOffset = this.radius * 0.28;
         const eyeR = this.radius * 0.11;
-        const lookX = clamp(this.vx / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
-        const lookY = clamp(this.vy / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
+        const lookX = clamp(this.vx / getSpeedLimits(this).maxSpeed, -1, 1) * this.radius * 0.08;
+        const lookY = clamp(this.vy / getSpeedLimits(this).maxSpeed, -1, 1) * this.radius * 0.08;
 
         const awakened = this.ability === "ironMining" && this.ironMiningActive;
         const eyeColor = awakened ? "#fff200" : "#fff";
@@ -1500,6 +1510,33 @@
       ctx.restore();
     }
 
+    function getCornerSpawn(isP1, radius) {
+      const pad = 70;
+      const jitter = 42;
+      if (isP1) {
+        return {
+          x: ARENA.x + radius + pad + rand(-jitter, jitter),
+          y: ARENA.y + ARENA.h - radius - pad + rand(-jitter, jitter)
+        };
+      }
+      return {
+        x: ARENA.x + ARENA.w - radius - pad + rand(-jitter, jitter),
+        y: ARENA.y + radius + pad + rand(-jitter, jitter)
+      };
+    }
+
+    function getInitialVelocity(char, spawnX, spawnY) {
+      const centerX = ARENA.x + ARENA.w / 2;
+      const centerY = ARENA.y + ARENA.h / 2;
+      const angle = Math.atan2(centerY - spawnY, centerX - spawnX) + rand(-0.3, 0.3);
+      const scale = (char.speed || PHYSICS.baseMoveSpeed) / PHYSICS.baseMoveSpeed;
+      const speed = PHYSICS.minSpeed * scale * 1.1;
+      return {
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed
+      };
+    }
+
     function createBallFromCharacter(char, x, y, vx, vy) {
       return new Ball({
         id: char.id,
@@ -1522,27 +1559,35 @@
         abilityDamage: char.abilityDamage,
         meleeDamage: char.meleeDamage,
         rangedDamage: char.rangedDamage,
-        projectileCooldown: char.projectileCooldown
+        projectileCooldown: char.projectileCooldown,
+        moveSpeed: char.speed ?? PHYSICS.baseMoveSpeed
       });
     }
 
     function createBalls() {
       [fighterA, fighterB] = pickBattleCharacters();
 
+      const p1Radius = fighterA.radius || 60;
+      const p2Radius = fighterB.radius || 60;
+      const p1Spawn = getCornerSpawn(true, p1Radius);
+      const p2Spawn = getCornerSpawn(false, p2Radius);
+      const p1Vel = getInitialVelocity(fighterA, p1Spawn.x, p1Spawn.y);
+      const p2Vel = getInitialVelocity(fighterB, p2Spawn.x, p2Spawn.y);
+
       greenBall = createBallFromCharacter(
         fighterA,
-        ARENA.x + ARENA.w * 0.35,
-        ARENA.y + ARENA.h * 0.4,
-        380,
-        300
+        p1Spawn.x,
+        p1Spawn.y,
+        p1Vel.vx,
+        p1Vel.vy
       );
 
       blueBall = createBallFromCharacter(
         fighterB,
-        ARENA.x + ARENA.w * 0.65,
-        ARENA.y + ARENA.h * 0.6,
-        -360,
-        -320
+        p2Spawn.x,
+        p2Spawn.y,
+        p2Vel.vx,
+        p2Vel.vy
       );
 
       balls = [greenBall, blueBall];
