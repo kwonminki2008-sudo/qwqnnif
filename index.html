@@ -414,7 +414,18 @@
     }
 
     function getArcherMeleeRange(attacker, defender) {
-      return attacker.radius + defender.radius + 12;
+      return attacker.radius + defender.radius + 32;
+    }
+
+    function isMirrorMatch() {
+      return greenBall && blueBall && greenBall.displayName === blueBall.displayName;
+    }
+
+    function formatPlayerName(ball, isP1) {
+      if (isMirrorMatch()) {
+        return (isP1 ? "P1 " : "P2 ") + ball.displayName;
+      }
+      return ball.displayName;
     }
 
     function isArcherInMelee(attacker, defender) {
@@ -511,7 +522,7 @@
 
         arrow.life -= dt * 1000;
         arrow.trail.push({ x: arrow.x, y: arrow.y });
-        if (arrow.trail.length > 7) arrow.trail.shift();
+        if (arrow.trail.length > 4) arrow.trail.shift();
         arrow.x += arrow.vx * dt;
         arrow.y += arrow.vy * dt;
 
@@ -548,41 +559,39 @@
         if (!arrow.active) continue;
 
         ctx.save();
-        for (let i = 0; i < arrow.trail.length; i++) {
-          const t = arrow.trail[i];
-          const p = (i + 1) / arrow.trail.length;
+        if (arrow.trail.length > 1) {
+          ctx.strokeStyle = "rgba(90, 90, 90, 0.35)";
+          ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(t.x, t.y, 4 + p * 3, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255, 180, 60, ${p * 0.35})`;
-          ctx.fill();
+          ctx.moveTo(arrow.trail[0].x, arrow.trail[0].y);
+          for (let i = 1; i < arrow.trail.length; i++) {
+            ctx.lineTo(arrow.trail[i].x, arrow.trail[i].y);
+          }
+          ctx.stroke();
         }
 
         const angle = Math.atan2(arrow.vy, arrow.vx);
         ctx.translate(arrow.x, arrow.y);
         ctx.rotate(angle);
-        ctx.scale(1.8, 1.8);
 
-        ctx.fillStyle = "#ffb03a";
-        ctx.strokeStyle = "#1a1a1a";
+        ctx.strokeStyle = "#111";
         ctx.lineWidth = 3;
-        ctx.fillRect(-14, -3.5, 24, 7);
-        ctx.strokeRect(-14, -3.5, 24, 7);
-
-        ctx.fillStyle = "#ddd";
         ctx.beginPath();
-        ctx.moveTo(10, 0);
-        ctx.lineTo(18, -5);
-        ctx.lineTo(18, 5);
+        ctx.moveTo(-16, 0);
+        ctx.lineTo(12, 0);
+        ctx.stroke();
+
+        ctx.fillStyle = "#bbb";
+        ctx.strokeStyle = "#111";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(12, 0);
+        ctx.lineTo(20, -4);
+        ctx.lineTo(20, 4);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
 
-        ctx.fillStyle = "#5c3a1e";
-        ctx.fillRect(-18, -2, 5, 4);
-        ctx.strokeRect(-18, -2, 5, 4);
-
-        ctx.fillStyle = "#c44";
-        ctx.fillRect(-3, -1.5, 3, 3);
         ctx.restore();
       }
     }
@@ -988,7 +997,9 @@
         ctx.translate(offset, this.weaponOffsetY);
 
         if (this.ability === "archer") {
-          if (this.archerMeleeMode) {
+          const opponent = balls.find((b) => b !== this);
+          const inMelee = opponent && isArcherInMelee(this, opponent);
+          if (inMelee) {
             drawDagger(0, 0, this.weaponScale);
           } else {
             drawBow(0, 0, this.weaponScale);
@@ -1051,28 +1062,22 @@
       ctx.translate(x, y);
       ctx.scale(scale, scale);
 
-      ctx.strokeStyle = "#5c3a1e";
-      ctx.lineWidth = 4;
+      ctx.strokeStyle = "#6b4f1d";
+      ctx.lineWidth = 3;
       ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.arc(-2, 0, 16, Math.PI * 0.55, Math.PI * 1.45);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(2, 0, 16, -Math.PI * 0.45, Math.PI * 0.45);
+      ctx.arc(3, 0, 13, -Math.PI * 0.48, Math.PI * 0.48);
       ctx.stroke();
 
       ctx.strokeStyle = "#ddd";
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(0, -14);
-      ctx.lineTo(0, 14);
+      ctx.moveTo(3, -11);
+      ctx.lineTo(3, 11);
       ctx.stroke();
 
-      ctx.fillStyle = "#6b4f1d";
-      ctx.fillRect(-3, -5, 6, 10);
-      ctx.strokeStyle = "#3d2614";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(-3, -5, 6, 10);
+      ctx.fillStyle = "#5c3a1e";
+      ctx.fillRect(1, -4, 4, 8);
 
       ctx.restore();
     }
@@ -1346,11 +1351,11 @@
       if (greenBall && blueBall) {
         ctx.font = "bold 34px Courier New, monospace";
         ctx.fillStyle = greenBall.color;
-        ctx.fillText(greenBall.displayName, W / 2 - 180, 210);
+        ctx.fillText(formatPlayerName(greenBall, true), W / 2 - 180, 210);
         ctx.fillStyle = "#666";
         ctx.fillText("VS", W / 2, 210);
         ctx.fillStyle = blueBall.color;
-        ctx.fillText(blueBall.displayName, W / 2 + 180, 210);
+        ctx.fillText(formatPlayerName(blueBall, false), W / 2 + 180, 210);
       }
     }
 
@@ -1376,8 +1381,9 @@
       ctx.strokeStyle = COLORS.black;
       ctx.lineWidth = 4;
       const labelX = isLeft ? x : x + barW;
-      ctx.strokeText(ball.displayName, labelX, barY - 18);
-      ctx.fillText(ball.displayName, labelX, barY - 18);
+      const nameLabel = formatPlayerName(ball, isLeft);
+      ctx.strokeText(nameLabel, labelX, barY - 18);
+      ctx.fillText(nameLabel, labelX, barY - 18);
 
       ctx.font = "bold 48px Courier New, monospace";
       const hpX = isLeft ? x + barW : x;
@@ -1516,7 +1522,8 @@
       if (!winningBall) return;
 
       const winBall = winningBall;
-      const winText = winBall.displayName + " WINS";
+      const playerPrefix = winningBall === greenBall ? "P1 " : "P2 ";
+      const winText = playerPrefix + winBall.displayName + " WINS";
       const winColor = winBall.color;
 
       ctx.strokeText(winText, W / 2, H / 2);
