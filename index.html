@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1080, initial-scale=1.0">
+  <title>Ball Battle — YouTube Shorts</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      font-family: "Courier New", Courier, monospace;
+    }
+
+    #wrapper {
+      position: relative;
+      width: 1080px;
+      height: 1920px;
+      max-width: 100vw;
+      max-height: 100vh;
+      aspect-ratio: 9 / 16;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrapper">
+    <canvas id="canvas" width="1080" height="1920"></canvas>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const W = 1080;
+    const H = 1920;
+
+    const ARENA = {
+      x: 90,
+      y: 280,
+      w: 900,
+      h: 1200
+    };
+
+    const COLORS = {
+      green: "#2ecc40",
+      greenDark: "#1a8f28",
+      blue: "#0074d9",
+      blueDark: "#0056a3",
+      white: "#ffffff",
+      black: "#000000",
+      damage: "#ff4136",
+      ironMining: "#ffd700",
+      hpGreen: "#2ecc40",
+      hpBlue: "#0074d9"
+    };
+
+    const ABILITY = {
+      ironMiningInterval: 5000,
+      ironMiningDuration: 3000,
+      ironMiningDamageMultiplier: 2.8
+    };
+
+    const damageNumbers = [];
+    const textEffects = [];
+    let gameOver = false;
+    let winner = null;
+    let lastTime = 0;
+
+    function clamp(v, min, max) {
+      return Math.max(min, Math.min(max, v));
+    }
+
+    function rand(min, max) {
+      return min + Math.random() * (max - min);
+    }
+
+    function spawnDamageNumber(x, y, amount) {
+      damageNumbers.push({
+        x,
+        y,
+        text: String(Math.round(amount)),
+        alpha: 1,
+        vy: -2.8,
+        life: 900
+      });
+    }
+
+    function spawnTextEffect(x, y, text, color, size = 48) {
+      textEffects.push({
+        x,
+        y,
+        text,
+        color,
+        size,
+        alpha: 1,
+        life: 1800,
+        vy: -1.2
+      });
+    }
+
+    class Ball {
+      constructor(config) {
+        this.name = config.name;
+        this.color = config.color;
+        this.colorDark = config.colorDark;
+        this.x = config.x;
+        this.y = config.y;
+        this.vx = config.vx;
+        this.vy = config.vy;
+        this.radius = config.radius;
+        this.hp = config.hp;
+        this.maxHp = config.hp;
+        this.weapon = config.weapon;
+        this.ability = config.ability;
+        this.baseDamage = config.baseDamage;
+        this.weaponAngle = 0;
+        this.weaponWobble = 0;
+        this.collisionCooldown = 0;
+        this.abilityTimer = config.ability === "ironMining" ? ABILITY.ironMiningInterval : 0;
+        this.ironMiningActive = false;
+        this.ironMiningTimeLeft = 0;
+      }
+
+      get damageMultiplier() {
+        if (this.ironMiningActive) return ABILITY.ironMiningDamageMultiplier;
+        return 1;
+      }
+
+      update(dt) {
+        if (gameOver) return;
+
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        const left = ARENA.x + this.radius;
+        const right = ARENA.x + ARENA.w - this.radius;
+        const top = ARENA.y + this.radius;
+        const bottom = ARENA.y + ARENA.h - this.radius;
+
+        if (this.x < left) {
+          this.x = left;
+          this.vx = Math.abs(this.vx);
+        } else if (this.x > right) {
+          this.x = right;
+          this.vx = -Math.abs(this.vx);
+        }
+
+        if (this.y < top) {
+          this.y = top;
+          this.vy = Math.abs(this.vy);
+        } else if (this.y > bottom) {
+          this.y = bottom;
+          this.vy = -Math.abs(this.vy);
+        }
+
+        const speed = Math.hypot(this.vx, this.vy);
+        const targetAngle = Math.atan2(this.vy, this.vx);
+        this.weaponAngle += (targetAngle - this.weaponAngle) * 0.12;
+        this.weaponWobble += dt * (8 + speed * 0.4);
+
+        if (this.collisionCooldown > 0) {
+          this.collisionCooldown -= dt * 1000;
+        }
+
+        if (this.ability === "ironMining") {
+          this.abilityTimer -= dt * 1000;
+
+          if (this.ironMiningActive) {
+            this.ironMiningTimeLeft -= dt * 1000;
+            if (this.ironMiningTimeLeft <= 0) {
+              this.ironMiningActive = false;
+            }
+          }
+
+          if (this.abilityTimer <= 0 && !this.ironMiningActive) {
+            this.ironMiningActive = true;
+            this.ironMiningTimeLeft = ABILITY.ironMiningDuration;
+            this.abilityTimer = ABILITY.ironMiningInterval;
+            spawnTextEffect(this.x, this.y - this.radius - 40, "IRON MINING!", COLORS.ironMining, 42);
+          }
+        }
+      }
+
+      draw() {
+        ctx.save();
+
+        const gradient = ctx.createRadialGradient(
+          this.x - this.radius * 0.3,
+          this.y - this.radius * 0.3,
+          this.radius * 0.1,
+          this.x,
+          this.y,
+          this.radius
+        );
+        gradient.addColorStop(0, this.color);
+        gradient.addColorStop(1, this.colorDark);
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(0,0,0,0.35)";
+        ctx.stroke();
+
+        if (this.ironMiningActive) {
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.weaponWobble * 2) * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255, 215, 0, ${0.55 + Math.sin(this.weaponWobble * 3) * 0.25})`;
+          ctx.lineWidth = 5;
+          ctx.stroke();
+        }
+
+        this.drawWeapon();
+
+        ctx.restore();
+      }
+
+      drawWeapon() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        const wobble = Math.sin(this.weaponWobble) * 0.18;
+        ctx.rotate(this.weaponAngle + wobble);
+
+        const offset = this.radius + 6;
+        ctx.translate(offset, 0);
+
+        if (this.weapon === "pickaxe") {
+          drawPickaxe(0, 0, this.ironMiningActive);
+        } else if (this.weapon === "stick") {
+          drawStick(0, 0);
+        }
+
+        ctx.restore();
+      }
+    }
+
+    function drawPickaxe(x, y, powered) {
+      const scale = 2.2;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+
+      const handleColor = powered ? "#8b6914" : "#6b4f1d";
+      const headColor = powered ? "#e8e8e8" : "#aaaaaa";
+      const edgeColor = powered ? "#ffd700" : "#888888";
+
+      ctx.fillStyle = handleColor;
+      ctx.fillRect(-2, -2, 4, 22);
+
+      ctx.fillStyle = headColor;
+      ctx.fillRect(-10, -6, 20, 6);
+      ctx.fillRect(-4, -10, 8, 4);
+
+      ctx.fillStyle = edgeColor;
+      ctx.fillRect(-11, -7, 3, 8);
+      ctx.fillRect(8, -7, 3, 8);
+
+      if (powered) {
+        ctx.fillStyle = "rgba(255, 215, 0, 0.7)";
+        ctx.fillRect(-10, -6, 20, 2);
+      }
+
+      ctx.restore();
+    }
+
+    function drawStick(x, y) {
+      const scale = 2.4;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-0.4);
+      ctx.scale(scale, scale);
+
+      ctx.fillStyle = "#5c3a1e";
+      ctx.fillRect(-2, -2, 4, 26);
+
+      ctx.fillStyle = "#3d2614";
+      ctx.fillRect(-1, 20, 2, 4);
+
+      ctx.restore();
+    }
+
+    const greenBall = new Ball({
+      name: "green",
+      color: COLORS.green,
+      colorDark: COLORS.greenDark,
+      x: ARENA.x + ARENA.w * 0.35,
+      y: ARENA.y + ARENA.h * 0.4,
+      vx: 280,
+      vy: 220,
+      radius: 58,
+      hp: 41,
+      weapon: "pickaxe",
+      ability: "ironMining",
+      baseDamage: 9
+    });
+
+    const blueBall = new Ball({
+      name: "blue",
+      color: COLORS.blue,
+      colorDark: COLORS.blueDark,
+      x: ARENA.x + ARENA.w * 0.65,
+      y: ARENA.y + ARENA.h * 0.6,
+      vx: -260,
+      vy: -240,
+      radius: 72,
+      hp: 95,
+      weapon: "stick",
+      ability: "normal",
+      baseDamage: 7
+    });
+
+    const balls = [greenBall, blueBall];
+
+    function resolveBallCollision(a, b) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = a.radius + b.radius;
+
+      if (dist >= minDist || dist === 0) return;
+
+      const nx = dx / dist;
+      const ny = dy / dist;
+
+      const overlap = minDist - dist;
+      a.x -= nx * overlap * 0.5;
+      a.y -= ny * overlap * 0.5;
+      b.x += nx * overlap * 0.5;
+      b.y += ny * overlap * 0.5;
+
+      const dvx = a.vx - b.vx;
+      const dvy = a.vy - b.vy;
+      const impactSpeed = Math.abs(dvx * nx + dvy * ny);
+
+      if (impactSpeed < 1) return;
+
+      const restitution = 0.92;
+      const impulse = (2 * impactSpeed) / (1 / a.radius + 1 / b.radius) * restitution * 0.015;
+
+      a.vx -= impulse * nx / a.radius;
+      a.vy -= impulse * ny / a.radius;
+      b.vx += impulse * nx / b.radius;
+      b.vy += impulse * ny / b.radius;
+
+      if (a.collisionCooldown <= 0 && b.collisionCooldown <= 0) {
+        const relSpeed = Math.hypot(a.vx - b.vx, a.vy - b.vy);
+        const speedBonus = clamp(relSpeed * 0.035, 0, 18);
+
+        const damageToB = a.baseDamage * a.damageMultiplier + speedBonus;
+        const damageToA = b.baseDamage * b.damageMultiplier + speedBonus;
+
+        b.hp -= damageToB;
+        a.hp -= damageToA;
+
+        const midX = (a.x + b.x) / 2;
+        const midY = (a.y + b.y) / 2;
+
+        spawnDamageNumber(midX - 30, midY - 20, damageToB);
+        spawnDamageNumber(midX + 30, midY - 20, damageToA);
+
+        a.collisionCooldown = 280;
+        b.collisionCooldown = 280;
+
+        if (a.hp <= 0 || b.hp <= 0) {
+          gameOver = true;
+          winner = a.hp <= 0 ? (a.name === "green" ? "blue" : "green") : (b.name === "green" ? "blue" : "green");
+        }
+      }
+    }
+
+    function drawArena() {
+      ctx.fillStyle = COLORS.black;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.fillStyle = COLORS.white;
+      ctx.fillRect(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
+
+      ctx.strokeStyle = "#cccccc";
+      ctx.lineWidth = 6;
+      ctx.strokeRect(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
+    }
+
+    function drawHeader() {
+      ctx.fillStyle = COLORS.white;
+      ctx.font = "bold 52px Courier New, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("BALL BATTLE", W / 2, 120);
+
+      ctx.font = "28px Courier New, monospace";
+      ctx.fillStyle = "#888888";
+      ctx.fillText("YouTube Shorts Simulation", W / 2, 170);
+
+      ctx.font = "24px Courier New, monospace";
+      ctx.textAlign = "left";
+      ctx.fillStyle = COLORS.green;
+      ctx.fillText("GREEN — Pickaxe | IRON MINING (5s)", 90, 230);
+      ctx.fillStyle = COLORS.blue;
+      ctx.fillText("BLUE — Stick | NORMAL", 90, 260);
+    }
+
+    function drawHpBar() {
+      const barY = ARENA.y + ARENA.h + 80;
+      const barW = 380;
+      const barH = 36;
+
+      ctx.font = "bold 36px Courier New, monospace";
+      ctx.textAlign = "center";
+
+      const greenCenterX = W / 2 - 220;
+      const blueCenterX = W / 2 + 220;
+
+      drawSingleHp(greenBall, greenCenterX, barY, barW, barH, COLORS.hpGreen, "GREEN");
+      drawSingleHp(blueBall, blueCenterX, barY, barW, barH, COLORS.hpBlue, "BLUE");
+    }
+
+    function drawSingleHp(ball, centerX, barY, barW, barH, color, label) {
+      const x = centerX - barW / 2;
+
+      ctx.fillStyle = color;
+      ctx.fillText(`${label}: ${Math.max(0, Math.ceil(ball.hp))} HP`, centerX, barY - 16);
+
+      ctx.fillStyle = "#222222";
+      ctx.fillRect(x, barY, barW, barH);
+
+      const ratio = clamp(ball.hp / ball.maxHp, 0, 1);
+      ctx.fillStyle = color;
+      ctx.fillRect(x, barY, barW * ratio, barH);
+
+      ctx.strokeStyle = COLORS.white;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, barY, barW, barH);
+
+      if (ball.ironMiningActive) {
+        ctx.font = "bold 22px Courier New, monospace";
+        ctx.fillStyle = COLORS.ironMining;
+        ctx.fillText("MINING!", centerX, barY + barH + 30);
+        ctx.font = "bold 36px Courier New, monospace";
+      }
+    }
+
+    function drawDamageNumbers(dt) {
+      for (let i = damageNumbers.length - 1; i >= 0; i--) {
+        const d = damageNumbers[i];
+        d.life -= dt * 1000;
+        d.y += d.vy;
+        d.alpha = clamp(d.life / 900, 0, 1);
+
+        ctx.save();
+        ctx.globalAlpha = d.alpha;
+        ctx.font = "bold 44px Courier New, monospace";
+        ctx.fillStyle = COLORS.damage;
+        ctx.strokeStyle = COLORS.black;
+        ctx.lineWidth = 4;
+        ctx.textAlign = "center";
+        ctx.strokeText(d.text, d.x, d.y);
+        ctx.fillText(d.text, d.x, d.y);
+        ctx.restore();
+
+        if (d.life <= 0) damageNumbers.splice(i, 1);
+      }
+    }
+
+    function drawTextEffects(dt) {
+      for (let i = textEffects.length - 1; i >= 0; i--) {
+        const t = textEffects[i];
+        t.life -= dt * 1000;
+        t.y += t.vy;
+        t.alpha = clamp(t.life / 1800, 0, 1);
+
+        ctx.save();
+        ctx.globalAlpha = t.alpha;
+        ctx.font = `bold ${t.size}px Courier New, monospace`;
+        ctx.fillStyle = t.color;
+        ctx.strokeStyle = COLORS.black;
+        ctx.lineWidth = 5;
+        ctx.textAlign = "center";
+        ctx.strokeText(t.text, t.x, t.y);
+        ctx.fillText(t.text, t.x, t.y);
+        ctx.restore();
+
+        if (t.life <= 0) textEffects.splice(i, 1);
+      }
+    }
+
+    function drawWinScreen() {
+      if (!gameOver || !winner) return;
+
+      ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+      ctx.fillRect(0, 0, W, H);
+
+      const winText = winner === "green" ? "GREEN WINS" : "BLUE WINS";
+      const winColor = winner === "green" ? COLORS.green : COLORS.blue;
+
+      ctx.font = "bold 96px Courier New, monospace";
+      ctx.textAlign = "center";
+      ctx.strokeStyle = COLORS.black;
+      ctx.lineWidth = 10;
+      ctx.strokeText(winText, W / 2, H / 2);
+      ctx.fillStyle = winColor;
+      ctx.fillText(winText, W / 2, H / 2);
+
+      ctx.font = "32px Courier New, monospace";
+      ctx.fillStyle = COLORS.white;
+      ctx.fillText("Refresh to replay", W / 2, H / 2 + 70);
+    }
+
+    function update(dt) {
+      if (!gameOver) {
+        for (const ball of balls) {
+          ball.update(dt);
+        }
+        resolveBallCollision(greenBall, blueBall);
+      }
+
+      drawArena();
+      drawHeader();
+
+      for (const ball of balls) {
+        ball.draw();
+      }
+
+      drawDamageNumbers(dt);
+      drawTextEffects(dt);
+      drawHpBar();
+      drawWinScreen();
+    }
+
+    function loop(timestamp) {
+      if (!lastTime) lastTime = timestamp;
+      const dt = clamp((timestamp - lastTime) / 1000, 0, 0.033);
+      lastTime = timestamp;
+
+      update(dt);
+      requestAnimationFrame(loop);
+    }
+
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
