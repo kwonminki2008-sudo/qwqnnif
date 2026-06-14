@@ -214,6 +214,28 @@
         weaponOffsetX: 6,
         weaponOffsetY: 0,
         radius: 72
+      },
+      {
+        id: "archer",
+        name: "Archer",
+        teamColor: "#9b59b6",
+        hp: 45,
+        baseDamage: 8,
+        meleeDamage: 8,
+        rangedDamage: 15,
+        abilityName: "RANGED SHOT",
+        abilityCooldown: 3000,
+        abilityType: "archer",
+        ballColor: "#9b59b6",
+        weaponType: "bow",
+        weaponColor: "#8b4513",
+        weaponImage: "bow",
+        ballImage: null,
+        weaponScale: 2.0,
+        weaponOffsetX: 6,
+        weaponOffsetY: 0,
+        radius: 58,
+        projectileCooldown: 3000
       }
     ];
     // ===== END CHARACTERS =====
@@ -226,6 +248,7 @@
     let impactFlashes = [];
     let lightningBolts = [];
     let electricEffects = [];
+    let arrows = [];
     let gameOver = false;
     let winner = null;
     let winningBall = null;
@@ -364,7 +387,22 @@
       screenShake.duration = Math.max(screenShake.duration, duration);
     }
 
-    function getAttackDamage(attacker) {
+    function getArcherMeleeRange(attacker, defender) {
+      return attacker.radius + defender.radius + 12;
+    }
+
+    function isArcherInMelee(attacker, defender) {
+      if (!defender || attacker.ability !== "archer") return false;
+      return Math.hypot(attacker.x - defender.x, attacker.y - defender.y) <= getArcherMeleeRange(attacker, defender);
+    }
+
+    function getAttackDamage(attacker, defender) {
+      if (attacker.ability === "archer" && defender) {
+        if (isArcherInMelee(attacker, defender)) {
+          return Math.round(attacker.meleeDamage * attacker.damageMultiplier);
+        }
+        return attacker.rangedDamage;
+      }
       return Math.round(attacker.baseDamage * attacker.damageMultiplier);
     }
 
@@ -376,7 +414,7 @@
     }
 
     function computeHitDamage(attacker, defender) {
-      return computeReceivedDamage(defender, getAttackDamage(attacker));
+      return computeReceivedDamage(defender, getAttackDamage(attacker, defender));
     }
 
     function spawnDamageNumber(victim, attacker, amount) {
@@ -417,6 +455,90 @@
         alpha: 1,
         life: 260
       });
+    }
+
+    function spawnArrow(fromBall, toBall) {
+      const dx = toBall.x - fromBall.x;
+      const dy = toBall.y - fromBall.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const speed = 920;
+      arrows.push({
+        x: fromBall.x,
+        y: fromBall.y,
+        vx: (dx / dist) * speed,
+        vy: (dy / dist) * speed,
+        fromBall,
+        damage: fromBall.rangedDamage,
+        life: 2500,
+        active: true
+      });
+    }
+
+    function updateArrows(dt) {
+      for (let i = arrows.length - 1; i >= 0; i--) {
+        const arrow = arrows[i];
+        if (!arrow.active) {
+          arrows.splice(i, 1);
+          continue;
+        }
+
+        arrow.life -= dt * 1000;
+        arrow.x += arrow.vx * dt;
+        arrow.y += arrow.vy * dt;
+
+        if (
+          arrow.life <= 0 ||
+          arrow.x < ARENA.x ||
+          arrow.x > ARENA.x + ARENA.w ||
+          arrow.y < ARENA.y ||
+          arrow.y > ARENA.y + ARENA.h
+        ) {
+          arrow.active = false;
+          continue;
+        }
+
+        const target = balls.find((b) => b !== arrow.fromBall);
+        if (!target) continue;
+
+        const dx = target.x - arrow.x;
+        const dy = target.y - arrow.y;
+        if (Math.hypot(dx, dy) <= target.radius + 8) {
+          const damage = computeReceivedDamage(target, arrow.damage);
+          target.hp -= damage;
+          spawnDamageNumber(target, arrow.fromBall, damage);
+          spawnImpactFlash(target.x, target.y, 40);
+          arrow.active = false;
+
+          if (!gameOver && target.hp <= 0) {
+            gameOver = true;
+            winningBall = arrow.fromBall;
+            winner = winningBall.id;
+            backToSelectBtn.style.display = "block";
+          }
+        }
+      }
+    }
+
+    function drawArrows() {
+      for (const arrow of arrows) {
+        if (!arrow.active) continue;
+        ctx.save();
+        const angle = Math.atan2(arrow.vy, arrow.vx);
+        ctx.translate(arrow.x, arrow.y);
+        ctx.rotate(angle);
+        ctx.fillStyle = "#e8dcc8";
+        ctx.fillRect(-12, -2, 18, 4);
+        ctx.fillStyle = "#888";
+        ctx.beginPath();
+        ctx.moveTo(6, 0);
+        ctx.lineTo(12, -4);
+        ctx.lineTo(12, 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#5c3a1e";
+        ctx.fillRect(-14, -1, 4, 2);
+        ctx.restore();
+      }
     }
 
     function spawnLightning(fromBall, toBall) {
@@ -595,6 +717,11 @@
         this.weaponOffsetY = config.weaponOffsetY;
         this.ability = config.ability;
         this.baseDamage = config.baseDamage;
+        this.meleeDamage = config.meleeDamage ?? config.baseDamage;
+        this.rangedDamage = config.rangedDamage ?? 15;
+        this.projectileCooldown = config.projectileCooldown ?? 3000;
+        this.projectileTimer = config.ability === "archer" ? this.projectileCooldown : 0;
+        this.archerMeleeMode = false;
         this.weaponAngle = Math.atan2(config.vy, config.vx);
         this.glowPhase = 0;
         this.trail = [];
@@ -709,6 +836,18 @@
             if (opponent) spawnLightning(this, opponent);
           }
         }
+
+        if (this.ability === "archer") {
+          const opponent = balls.find((b) => b !== this);
+          this.archerMeleeMode = opponent ? isArcherInMelee(this, opponent) : false;
+          if (opponent && !this.archerMeleeMode) {
+            this.projectileTimer -= dt * 1000;
+            if (this.projectileTimer <= 0) {
+              this.projectileTimer = this.projectileCooldown;
+              spawnArrow(this, opponent);
+            }
+          }
+        }
       }
 
       drawTrail() {
@@ -807,7 +946,13 @@
         const offset = this.radius + this.weaponOffsetX;
         ctx.translate(offset, this.weaponOffsetY);
 
-        if (this.weapon === "pickaxe") {
+        if (this.ability === "archer") {
+          if (this.archerMeleeMode) {
+            drawSword(0, 0, this.weaponScale);
+          } else {
+            drawBow(0, 0, this.weaponScale);
+          }
+        } else if (this.weapon === "pickaxe") {
           drawPickaxe(0, 0, this.ironMiningActive, this.weaponScale);
         } else if (this.weapon === "stick") {
           drawStick(0, 0, this.weaponScale);
@@ -860,6 +1005,37 @@
       ctx.restore();
     }
 
+    function drawBow(x, y, scale) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+      ctx.strokeStyle = "#8b4513";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, 14, -Math.PI * 0.45, Math.PI * 0.45);
+      ctx.stroke();
+      ctx.strokeStyle = "#ccc";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, -10);
+      ctx.lineTo(0, 10);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawSword(x, y, scale) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-0.3);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = "#ccc";
+      ctx.fillRect(-2, -14, 4, 22);
+      ctx.fillStyle = "#8b4513";
+      ctx.fillRect(-4, 6, 8, 4);
+      ctx.fillRect(-1, 10, 2, 6);
+      ctx.restore();
+    }
+
     function createBallFromCharacter(char, x, y, vx, vy) {
       return new Ball({
         id: char.id,
@@ -876,9 +1052,12 @@
         weaponScale: char.weaponScale,
         weaponOffsetX: char.weaponOffsetX,
         weaponOffsetY: char.weaponOffsetY,
-        ability: char.abilityType === "ironMining" ? "ironMining" : "normal",
+        ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : "normal",
         abilityCooldown: char.abilityCooldown || ABILITY.ironMiningInterval,
-        baseDamage: char.baseDamage
+        baseDamage: char.baseDamage,
+        meleeDamage: char.meleeDamage,
+        rangedDamage: char.rangedDamage,
+        projectileCooldown: char.projectileCooldown
       });
     }
 
@@ -1078,6 +1257,7 @@
       impactFlashes = [];
       lightningBolts = [];
       electricEffects = [];
+      arrows = [];
       gameOver = false;
       winner = null;
       winningBall = null;
@@ -1181,7 +1361,7 @@
       ctx.strokeStyle = COLORS.black;
       ctx.lineWidth = 3;
       const dmgX = isLeft ? x : x + barW;
-      const dmgLabel = "DMG: " + getAttackDamage(ball);
+      const dmgLabel = "DMG: " + getAttackDamage(ball, opponent);
       ctx.strokeText(dmgLabel, dmgX, barY + barH + 34);
       ctx.fillText(dmgLabel, dmgX, barY + barH + 34);
 
@@ -1324,6 +1504,7 @@
         }
         resolveBallCollision(greenBall, blueBall);
         updateLightning(dt);
+        updateArrows(dt);
       }
 
       const shake = getShakeOffset();
@@ -1339,6 +1520,7 @@
       }
 
       drawLightningBolts();
+      drawArrows();
       drawElectricEffects(dt);
       drawImpactFlashes(dt);
       drawDamageNumbers(dt);
