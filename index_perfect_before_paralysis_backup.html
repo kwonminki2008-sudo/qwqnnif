@@ -171,8 +171,7 @@
       ironMiningDuration: 3000,
       ironMiningDamageMultiplier: 2,
       ironMiningDamageReduction: 0.6,
-      lightningDamage: 5,
-      paralysisDuration: 1000
+      lightningDamage: 5
     };
 
     // ===== EDIT CHARACTERS HERE ONLY =====
@@ -447,21 +446,6 @@
       electricEffects.push({ x, y, life: 420, alpha: 1 });
     }
 
-    function isParalyzed(ball) {
-      return ball.paralyzedTimeLeft > 0;
-    }
-
-    function applyParalysis(ball) {
-      ball.savedVx = ball.vx;
-      ball.savedVy = ball.vy;
-      ball.frozenX = ball.x;
-      ball.frozenY = ball.y;
-      ball.paralyzedTimeLeft = ABILITY.paralysisDuration;
-      ball.vx = 0;
-      ball.vy = 0;
-      spawnTextEffect(ball.x, ball.y - ball.radius - 48, "PARALYZED", "#00eaff", 30);
-    }
-
     function updateLightning(dt) {
       for (let i = lightningBolts.length - 1; i >= 0; i--) {
         const bolt = lightningBolts[i];
@@ -482,7 +466,6 @@
           spawnElectricEffect(target.x, target.y);
           spawnImpactFlash(target.x, target.y, 52);
           spawnImpactFlash(target.x, target.y, 28);
-          applyParalysis(target);
           bolt.active = false;
 
           if (!gameOver && target.hp <= 0) {
@@ -603,11 +586,6 @@
         this.ironMiningActive = false;
         this.ironMiningTimeLeft = 0;
         this.awakenedEyeTimeLeft = 0;
-        this.paralyzedTimeLeft = 0;
-        this.savedVx = 0;
-        this.savedVy = 0;
-        this.frozenX = config.x;
-        this.frozenY = config.y;
       }
 
       get damageMultiplier() {
@@ -652,24 +630,6 @@
       update(dt) {
         if (this.awakenedEyeTimeLeft > 0) {
           this.awakenedEyeTimeLeft -= dt * 1000;
-        }
-
-        if (this.paralyzedTimeLeft > 0) {
-          this.paralyzedTimeLeft -= dt * 1000;
-          this.x = this.frozenX;
-          this.y = this.frozenY;
-          this.vx = 0;
-          this.vy = 0;
-          this.glowPhase += dt * 4;
-          if (this.collisionCooldown > 0) {
-            this.collisionCooldown -= dt * 1000;
-          }
-          if (this.paralyzedTimeLeft <= 0) {
-            this.vx = this.savedVx;
-            this.vy = this.savedVy;
-            enforceSpeedLimits(this);
-          }
-          return;
         }
 
         if (gameOver) return;
@@ -748,30 +708,6 @@
         ctx.fill();
       }
 
-      drawParalysisEffect() {
-        if (this.paralyzedTimeLeft <= 0) return;
-
-        ctx.save();
-        const pulse = 0.5 + Math.sin(this.glowPhase * 6) * 0.3;
-        ctx.globalAlpha = pulse;
-        ctx.strokeStyle = "#00eaff";
-        ctx.lineWidth = 3;
-        for (let i = 0; i < 4; i++) {
-          const angle = this.glowPhase * 3 + (i / 4) * Math.PI * 2;
-          const r = this.radius + 10;
-          ctx.beginPath();
-          ctx.moveTo(this.x + Math.cos(angle) * (this.radius + 4), this.y + Math.sin(angle) * (this.radius + 4));
-          ctx.lineTo(this.x + Math.cos(angle) * r, this.y + Math.sin(angle) * r);
-          ctx.stroke();
-        }
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius + 6, 0, Math.PI * 2);
-        ctx.strokeStyle = COLORS.green;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.restore();
-      }
-
       draw() {
         ctx.save();
         this.drawTrail();
@@ -785,7 +721,6 @@
         ctx.stroke();
 
         this.drawFace();
-        this.drawParalysisEffect();
 
         if (this.ironMiningActive) {
           ctx.beginPath();
@@ -916,71 +851,6 @@
       b.y += ny * overlap * (massA / totalMass) + ny * extra * 0.5;
     }
 
-    function resolveParalyzedCollision(a, b, nx, ny, overlap) {
-      const aStunned = isParalyzed(a);
-      const bStunned = isParalyzed(b);
-      if (!aStunned && !bStunned) return false;
-      if (aStunned && bStunned) return true;
-
-      let mover, frozen;
-      if (aStunned) {
-        frozen = a;
-        mover = b;
-        mover.x += nx * overlap;
-        mover.y += ny * overlap;
-      } else {
-        frozen = b;
-        mover = a;
-        mover.x -= nx * overlap;
-        mover.y -= ny * overlap;
-      }
-
-      const preSpeed = Math.hypot(mover.vx, mover.vy);
-      const e = PHYSICS.ballRestitution;
-      const vDotN = mover.vx * nx + mover.vy * ny;
-
-      if (frozen === a) {
-        if (vDotN < 0) {
-          mover.vx -= (1 + e) * vDotN * nx;
-          mover.vy -= (1 + e) * vDotN * ny;
-        }
-        mover.vx += nx * PHYSICS.knockbackForce * 0.45;
-        mover.vy += ny * PHYSICS.knockbackForce * 0.45;
-      } else {
-        if (vDotN > 0) {
-          mover.vx -= (1 + e) * vDotN * nx;
-          mover.vy -= (1 + e) * vDotN * ny;
-        }
-        mover.vx -= nx * PHYSICS.knockbackForce * 0.45;
-        mover.vy -= ny * PHYSICS.knockbackForce * 0.45;
-      }
-
-      preserveSpeedWithJitter(mover, preSpeed);
-      enforceSpeedLimits(mover);
-
-      const midX = (a.x + b.x) / 2;
-      const midY = (a.y + b.y) / 2;
-
-      if (frozen.collisionCooldown <= 0 && mover.collisionCooldown <= 0) {
-        const damage = computeHitDamage(mover, frozen);
-        frozen.hp -= damage;
-        spawnDamageNumber(frozen, mover, damage);
-        spawnImpactFlash(midX, midY, (a.radius + b.radius) * 0.55);
-        triggerScreenShake(14, 220);
-        frozen.collisionCooldown = PHYSICS.hitCooldownMs;
-        mover.collisionCooldown = PHYSICS.hitCooldownMs;
-
-        if (frozen.hp <= 0) {
-          gameOver = true;
-          winningBall = mover;
-          winner = winningBall.id;
-          backToSelectBtn.style.display = "block";
-        }
-      }
-
-      return true;
-    }
-
     function resolveBallCollision(a, b) {
       let dx = b.x - a.x;
       let dy = b.y - a.y;
@@ -999,10 +869,6 @@
       const nx = dx / dist;
       const ny = dy / dist;
       const overlap = minDist - dist;
-
-      if (isParalyzed(a) || isParalyzed(b)) {
-        if (resolveParalyzedCollision(a, b, nx, ny, overlap)) return;
-      }
 
       separateBalls(a, b, nx, ny, overlap);
 
