@@ -187,11 +187,13 @@
       archerMeleeEnterPad: 32,
       archerMeleeExitPad: 56,
       archerModeFlashMs: 400,
-      paladinInterval: 9000,
+      paladinInterval: 10000,
       paladinDropDamage: 30,
       paladinTelegraphMs: 380,
       paladinFallSpeed: 1680,
       paladinKnockback: 720,
+      collisionDuration: 1000,
+      collisionSpeedMultiplier: 2,
       arrowSpeed: 1320
     };
 
@@ -244,7 +246,7 @@
         hp: 30,
         baseDamage: 8,
         meleeDamage: 8,
-        rangedDamage: 30,
+        rangedDamage: 25,
         abilityName: "RANGED SHOT",
         abilityCooldown: 3000,
         abilityType: "archer",
@@ -290,18 +292,18 @@
         baseDamage: 6,
         abilityDamage: 30,
         abilityName: "EXCALIBUR",
-        abilityCooldown: 9000,
+        abilityCooldown: 10000,
         abilityType: "paladin",
         ballColor: "#ecf0f1",
         weaponType: "excalibur",
         weaponColor: "#ffd700",
         weaponImage: "excalibur",
         ballImage: null,
-        weaponScale: 2.0,
-        weaponOffsetX: 6,
+        weaponScale: 2.4,
+        weaponOffsetX: 8,
         weaponOffsetY: 0,
-        radius: 62,
-        speed: 10
+        radius: 68,
+        speed: 12
       }
     ];
     // ===== END CHARACTERS =====
@@ -433,6 +435,9 @@
 
     function getBallSpeedScale(ball) {
       let scale = getSpeedStatScale(ball.moveSpeed ?? PHYSICS.SPEED_STAT_BASELINE);
+      if (ball.collisionEffectTimeLeft > 0) {
+        scale *= ABILITY.collisionSpeedMultiplier;
+      }
       if (ball.scissorActive) {
         scale *= ABILITY.scissorSpeedMultiplier;
       }
@@ -819,9 +824,7 @@
             drop.active = false;
             drop.y = target.y;
             applyDamage(target, drop.fromBall, drop.damage);
-            target.vx += rand(-0.4, 0.4) * ABILITY.paladinKnockback * 0.4;
-            target.vy += ABILITY.paladinKnockback * 0.85;
-            enforceSpeedLimits(target);
+            applyCollisionEffect(target);
             spawnHolyShockwave(target.x, target.y);
             spawnImpactFlash(target.x, target.y, 96);
             spawnImpactFlash(target.x, target.y, 58);
@@ -1112,9 +1115,21 @@
       ball.frozenX = ball.x;
       ball.frozenY = ball.y;
       ball.paralyzedTimeLeft = ABILITY.paralysisDuration;
+      ball.collisionEffectTimeLeft = 0;
       ball.vx = 0;
       ball.vy = 0;
       spawnTextEffect(ball.x, ball.y - ball.radius - 48, "PARALYZED", "#00eaff", 30);
+    }
+
+    function applyCollisionEffect(ball) {
+      if (ball.paralyzedTimeLeft > 0) return;
+      ball.collisionEffectTimeLeft = ABILITY.collisionDuration;
+      const normalScale = getSpeedStatScale(ball.moveSpeed ?? PHYSICS.SPEED_STAT_BASELINE);
+      const speed = PHYSICS.BASE_MOVEMENT_MAX_SPEED * normalScale * ABILITY.collisionSpeedMultiplier;
+      const angle = rand(0, Math.PI * 2);
+      ball.vx = Math.cos(angle) * speed;
+      ball.vy = Math.sin(angle) * speed;
+      spawnTextEffect(ball.x, ball.y - ball.radius - 52, "COLLISION", "#ff9500", 32);
     }
 
     function updateLightning(dt) {
@@ -1265,6 +1280,7 @@
         this.bleedTickTimer = 0;
         this.bleedTicksRemaining = 0;
         this.bleedSource = null;
+        this.collisionEffectTimeLeft = 0;
         this.awakenedEyeTimeLeft = 0;
         this.paralyzedTimeLeft = 0;
         this.savedVx = 0;
@@ -1342,6 +1358,14 @@
         this.trail.push({ x: this.x, y: this.y });
         if (this.trail.length > 8) this.trail.shift();
         this.bounceOffWalls();
+
+        if (this.collisionEffectTimeLeft > 0) {
+          this.collisionEffectTimeLeft -= dt * 1000;
+          if (this.collisionEffectTimeLeft <= 0) {
+            this.collisionEffectTimeLeft = 0;
+            enforceSpeedLimits(this);
+          }
+        }
 
         const targetAngle = Math.atan2(this.vy, this.vx);
         const smoothFactor = clamp(dt * 5.5, 0, 0.07);
@@ -1543,6 +1567,30 @@
         ctx.restore();
       }
 
+      drawCollisionEffect() {
+        if (this.collisionEffectTimeLeft <= 0) return;
+
+        ctx.save();
+        const t = clamp(this.collisionEffectTimeLeft / ABILITY.collisionDuration, 0, 1);
+        ctx.globalAlpha = 0.5 * t;
+        const angle = Math.atan2(this.vy, this.vx);
+        for (let i = 0; i < 4; i++) {
+          const back = this.radius + 6 + i * 8;
+          ctx.strokeStyle = i % 2 === 0 ? "#ff9500" : "#ffd700";
+          ctx.lineWidth = 3 - i * 0.4;
+          ctx.beginPath();
+          ctx.moveTo(this.x - Math.cos(angle) * back, this.y - Math.sin(angle) * back);
+          ctx.lineTo(this.x - Math.cos(angle) * (back + 14), this.y - Math.sin(angle) * (back + 14));
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius + 5, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255, 149, 0, 0.55)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+      }
+
       drawParalysisEffect() {
         if (this.paralyzedTimeLeft <= 0) return;
 
@@ -1635,6 +1683,7 @@
         this.drawPaladinHelmet();
         this.drawParalysisEffect();
         this.drawBleedEffect();
+        this.drawCollisionEffect();
 
         if (this.ironMiningActive) {
           ctx.beginPath();
