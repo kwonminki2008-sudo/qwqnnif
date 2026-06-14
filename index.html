@@ -155,7 +155,10 @@
     };
 
     const PHYSICS = {
-      baseMoveSpeed: 10,
+      SPEED_STAT_BASELINE: 10,
+      BASE_MOVEMENT_SPEED: 340,
+      BASE_MOVEMENT_MAX_SPEED: 620,
+      BASE_SPAWN_SPEED: 484,
       minSpeed: 340,
       maxSpeed: 620,
       wallRestitution: 1.22,
@@ -395,15 +398,27 @@
       return ball.radius * ball.radius;
     }
 
-    function getSpeedLimits(ball) {
-      const baseScale = (ball.moveSpeed || PHYSICS.baseMoveSpeed) / PHYSICS.baseMoveSpeed;
-      let scale = baseScale;
+    function getSpeedStatScale(speedStat) {
+      return speedStat / PHYSICS.SPEED_STAT_BASELINE;
+    }
+
+    function getBallSpeedScale(ball) {
+      let scale = getSpeedStatScale(ball.moveSpeed ?? PHYSICS.SPEED_STAT_BASELINE);
       if (ball.scissorActive) {
         scale *= ABILITY.scissorSpeedMultiplier;
       }
+      return scale;
+    }
+
+    function getActualMovementSpeed(speedStat) {
+      return PHYSICS.BASE_MOVEMENT_SPEED * getSpeedStatScale(speedStat);
+    }
+
+    function getSpeedLimits(ball) {
+      const scale = getBallSpeedScale(ball);
       return {
-        minSpeed: PHYSICS.minSpeed * scale,
-        maxSpeed: PHYSICS.maxSpeed * scale
+        minSpeed: PHYSICS.BASE_MOVEMENT_SPEED * scale,
+        maxSpeed: PHYSICS.BASE_MOVEMENT_MAX_SPEED * scale
       };
     }
 
@@ -980,7 +995,7 @@
         this.vx = config.vx;
         this.vy = config.vy;
         this.radius = config.radius;
-        this.moveSpeed = config.moveSpeed ?? PHYSICS.baseMoveSpeed;
+        this.moveSpeed = config.moveSpeed ?? PHYSICS.SPEED_STAT_BASELINE;
         this.hp = config.hp;
         this.maxHp = config.hp;
         this.weapon = config.weapon;
@@ -1529,8 +1544,8 @@
       const centerX = ARENA.x + ARENA.w / 2;
       const centerY = ARENA.y + ARENA.h / 2;
       const angle = Math.atan2(centerY - spawnY, centerX - spawnX) + rand(-0.3, 0.3);
-      const scale = (char.speed || PHYSICS.baseMoveSpeed) / PHYSICS.baseMoveSpeed;
-      const speed = PHYSICS.minSpeed * scale * 1.1;
+      const scale = getSpeedStatScale(char.speed ?? PHYSICS.SPEED_STAT_BASELINE);
+      const speed = PHYSICS.BASE_SPAWN_SPEED * scale;
       return {
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed
@@ -1560,7 +1575,7 @@
         meleeDamage: char.meleeDamage,
         rangedDamage: char.rangedDamage,
         projectileCooldown: char.projectileCooldown,
-        moveSpeed: char.speed ?? PHYSICS.baseMoveSpeed
+        moveSpeed: char.speed ?? PHYSICS.SPEED_STAT_BASELINE
       });
     }
 
@@ -1698,7 +1713,8 @@
       let velAlongNormal = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
 
       if (velAlongNormal >= 0) {
-        velAlongNormal = -Math.max(PHYSICS.minSpeed * 0.35, 80);
+        const sepMin = Math.max(getSpeedLimits(a).minSpeed, getSpeedLimits(b).minSpeed);
+        velAlongNormal = -Math.max(sepMin * 0.35, 80);
       }
 
       const speedA = Math.hypot(a.vx, a.vy);
