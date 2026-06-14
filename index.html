@@ -401,6 +401,8 @@
     let timeBombs = [];
     let slashEffects = [];
     let ninjaAfterimages = [];
+    let bomberBurstEffects = [];
+    let bombExplosionEffects = [];
     let gameOver = false;
     let winner = null;
     let winningBall = null;
@@ -1140,8 +1142,88 @@
         x: fromBall.x,
         y: fromBall.y,
         fuseLeft: ABILITY.bomberFuseDuration,
-        active: true
+        active: true,
+        exploded: false,
+        hitTargets: new Set()
       });
+    }
+
+    function spawnBomberCollisionBurst(x, y) {
+      const sparks = [];
+      for (let i = 0; i < 7; i++) {
+        const angle = rand(0, Math.PI * 2);
+        const speed = rand(140, 320);
+        sparks.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: rand(180, 360),
+          size: rand(2, 4)
+        });
+      }
+      bomberBurstEffects.push({
+        x,
+        y,
+        life: 340,
+        alpha: 1,
+        ringRadius: 16,
+        sparks
+      });
+      spawnImpactFlash(x, y, 42, "#e74c3c");
+      spawnImpactFlash(x, y, 24, "#ff9500");
+    }
+
+    function spawnBombExplosionEffect(x, y) {
+      const sparks = [];
+      for (let i = 0; i < 10; i++) {
+        const angle = rand(0, Math.PI * 2);
+        const speed = rand(180, 420);
+        sparks.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: rand(220, 480),
+          size: rand(2.5, 5)
+        });
+      }
+      bombExplosionEffects.push({
+        x,
+        y,
+        life: 480,
+        alpha: 1,
+        ringRadius: ABILITY.bomberExplosionRadius * 0.35,
+        maxRingRadius: ABILITY.bomberExplosionRadius * 0.92,
+        sparks
+      });
+      spawnImpactFlash(x, y, ABILITY.bomberExplosionRadius * 0.85, "#e67e22");
+      spawnImpactFlash(x, y, ABILITY.bomberExplosionRadius * 0.45, "#ff9500");
+      triggerScreenShake(16, 240);
+    }
+
+    function explodeTimeBomb(bomb) {
+      if (bomb.exploded) return;
+      bomb.exploded = true;
+      bomb.active = false;
+
+      for (const ball of balls) {
+        if (ball === bomb.fromBall || ball.hp <= 0) continue;
+        if (bomb.hitTargets.has(ball)) continue;
+        const dist = Math.hypot(ball.x - bomb.x, ball.y - bomb.y);
+        if (dist > ABILITY.bomberExplosionRadius + ball.radius) continue;
+
+        bomb.hitTargets.add(ball);
+        applyDamage(ball, bomb.fromBall, ABILITY.bomberExplosionDamage);
+        const dx = ball.x - bomb.x;
+        const dy = ball.y - bomb.y;
+        const d = Math.hypot(dx, dy) || 1;
+        ball.vx += (dx / d) * ABILITY.bomberKnockback;
+        ball.vy += (dy / d) * ABILITY.bomberKnockback;
+        enforceSpeedLimits(ball);
+      }
+
+      spawnBombExplosionEffect(bomb.x, bomb.y);
     }
 
     function updateTimeBombs(dt) {
@@ -1154,23 +1236,82 @@
         }
         bomb.fuseLeft -= dt * 1000;
         if (bomb.fuseLeft > 0) continue;
-        bomb.active = false;
-        for (const ball of balls) {
-          if (ball === bomb.fromBall || ball.hp <= 0) continue;
-          const dist = Math.hypot(ball.x - bomb.x, ball.y - bomb.y);
-          if (dist <= ABILITY.bomberExplosionRadius + ball.radius * 0.35) {
-            applyDamage(ball, bomb.fromBall, ABILITY.bomberExplosionDamage);
-            const dx = ball.x - bomb.x;
-            const dy = ball.y - bomb.y;
-            const d = Math.hypot(dx, dy) || 1;
-            ball.vx += (dx / d) * ABILITY.bomberKnockback;
-            ball.vy += (dy / d) * ABILITY.bomberKnockback;
-            enforceSpeedLimits(ball);
-          }
+        explodeTimeBomb(bomb);
+      }
+    }
+
+    function drawBomberBurstEffects(dt) {
+      for (let i = bomberBurstEffects.length - 1; i >= 0; i--) {
+        const burst = bomberBurstEffects[i];
+        burst.life -= dt * 1000;
+        burst.alpha = clamp(burst.life / 340, 0, 1);
+        burst.ringRadius += dt * 110;
+
+        ctx.save();
+        ctx.globalAlpha = burst.alpha * 0.75;
+        ctx.strokeStyle = "#ff9500";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(burst.x, burst.y, burst.ringRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = burst.alpha * 0.45;
+        ctx.fillStyle = "#e74c3c";
+        ctx.beginPath();
+        ctx.arc(burst.x, burst.y, burst.ringRadius * 0.55, 0, Math.PI * 2);
+        ctx.fill();
+
+        for (const spark of burst.sparks) {
+          spark.life -= dt * 1000;
+          if (spark.life <= 0) continue;
+          spark.x += spark.vx * dt;
+          spark.y += spark.vy * dt;
+          ctx.globalAlpha = clamp(spark.life / 360, 0, 1) * burst.alpha;
+          ctx.fillStyle = spark.size > 3 ? "#ff9500" : "#fff";
+          ctx.beginPath();
+          ctx.arc(spark.x, spark.y, spark.size, 0, Math.PI * 2);
+          ctx.fill();
         }
-        spawnImpactFlash(bomb.x, bomb.y, ABILITY.bomberExplosionRadius * 0.85, "#e67e22");
-        spawnImpactFlash(bomb.x, bomb.y, ABILITY.bomberExplosionRadius * 0.45, "#ff9500");
-        triggerScreenShake(16, 240);
+        ctx.restore();
+
+        if (burst.life <= 0) bomberBurstEffects.splice(i, 1);
+      }
+    }
+
+    function drawBombExplosionEffects(dt) {
+      for (let i = bombExplosionEffects.length - 1; i >= 0; i--) {
+        const fx = bombExplosionEffects[i];
+        fx.life -= dt * 1000;
+        fx.alpha = clamp(fx.life / 480, 0, 1);
+        fx.ringRadius = Math.min(fx.maxRingRadius, fx.ringRadius + dt * 220);
+
+        ctx.save();
+        ctx.globalAlpha = fx.alpha * 0.55;
+        ctx.strokeStyle = "#e67e22";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, fx.ringRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = fx.alpha * 0.25;
+        ctx.fillStyle = "#ff9500";
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, fx.ringRadius * 0.72, 0, Math.PI * 2);
+        ctx.fill();
+
+        for (const spark of fx.sparks) {
+          spark.life -= dt * 1000;
+          if (spark.life <= 0) continue;
+          spark.x += spark.vx * dt;
+          spark.y += spark.vy * dt;
+          spark.vy += 180 * dt;
+          ctx.globalAlpha = clamp(spark.life / 480, 0, 1) * fx.alpha;
+          ctx.fillStyle = spark.size > 3.5 ? "#e74c3c" : "#ffd700";
+          ctx.beginPath();
+          ctx.arc(spark.x, spark.y, spark.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+
+        if (fx.life <= 0) bombExplosionEffects.splice(i, 1);
       }
     }
 
@@ -1484,8 +1625,9 @@
       spawnTextEffect(ball.x, ball.y - ball.radius - 52, "COLLISION", "#ff9500", 32);
     }
 
-    function handleBomberCollisionHit(a, b) {
+    function handleBomberCollisionHit(a, b, contactX, contactY) {
       if (a.ability !== "bomber" && b.ability !== "bomber") return;
+      spawnBomberCollisionBurst(contactX, contactY);
       applyCollisionEffect(a);
       applyCollisionEffect(b);
     }
@@ -2544,7 +2686,7 @@
         frozen.collisionCooldown = PHYSICS.hitCooldownMs;
         mover.collisionCooldown = PHYSICS.hitCooldownMs;
 
-        handleBomberCollisionHit(frozen, mover);
+        handleBomberCollisionHit(frozen, mover, midX, midY);
         handleScissorSkillHit(mover, frozen);
       }
 
@@ -2630,7 +2772,7 @@
           a.collisionCooldown = PHYSICS.hitCooldownMs;
           b.collisionCooldown = PHYSICS.hitCooldownMs;
 
-          handleBomberCollisionHit(a, b);
+          handleBomberCollisionHit(a, b, midX, midY);
           handleScissorSkillHit(a, b);
           handleScissorSkillHit(b, a);
       }
@@ -2651,6 +2793,8 @@
       timeBombs = [];
       slashEffects = [];
       ninjaAfterimages = [];
+      bomberBurstEffects = [];
+      bombExplosionEffects = [];
       gameOver = false;
       winner = null;
       winningBall = null;
@@ -3199,6 +3343,7 @@
       }
 
       drawTimeBombs(dt);
+      drawBombExplosionEffects(dt);
       drawSlashEffects(dt);
 
       drawLightningBolts();
@@ -3208,6 +3353,7 @@
       drawElectricEffects(dt);
       drawChompEffects(dt);
       drawBloodDrops(dt);
+      drawBomberBurstEffects(dt);
       drawImpactFlashes(dt);
       drawDamageNumbers(dt);
       drawTextEffects(dt);
