@@ -156,6 +156,8 @@
     let damageNumbers = [];
     let textEffects = [];
     let impactFlashes = [];
+    let lightningBolts = [];
+    let electricEffects = [];
     let gameOver = false;
     let winner = null;
     let lastTime = 0;
@@ -274,6 +276,131 @@
       });
     }
 
+    function spawnLightning(fromBall, toBall) {
+      lightningBolts.push({
+        x: fromBall.x,
+        y: fromBall.y,
+        fromBall,
+        toBall,
+        speed: 1500,
+        active: true
+      });
+    }
+
+    function spawnLightningDamageNumber(victim) {
+      damageNumbers.push({
+        x: victim.x,
+        y: victim.y - victim.radius * 0.35,
+        text: "-5",
+        color: COLORS.ironMining,
+        alpha: 1,
+        vy: -200,
+        life: 1400,
+        scale: 1.15
+      });
+    }
+
+    function spawnElectricEffect(x, y) {
+      electricEffects.push({ x, y, life: 420, alpha: 1 });
+    }
+
+    function updateLightning(dt) {
+      for (let i = lightningBolts.length - 1; i >= 0; i--) {
+        const bolt = lightningBolts[i];
+        if (!bolt.active) {
+          lightningBolts.splice(i, 1);
+          continue;
+        }
+
+        const target = bolt.toBall;
+        const dx = target.x - bolt.x;
+        const dy = target.y - bolt.y;
+        const dist = Math.hypot(dx, dy) || 1;
+
+        if (dist <= target.radius + 12) {
+          target.hp -= 5;
+          spawnLightningDamageNumber(target);
+          spawnElectricEffect(target.x, target.y);
+          spawnImpactFlash(target.x, target.y, 36);
+          bolt.active = false;
+
+          if (!gameOver && target.hp <= 0) {
+            gameOver = true;
+            winner = bolt.fromBall.id;
+            updateRestartButton();
+          }
+          continue;
+        }
+
+        const step = bolt.speed * dt;
+        bolt.x += (dx / dist) * step;
+        bolt.y += (dy / dist) * step;
+      }
+    }
+
+    function drawZigzagBolt(x1, y1, x2, y2) {
+      const segments = 4;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const px = (-dy / len) * 10;
+      const py = (dx / len) * 10;
+
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      for (let i = 1; i < segments; i++) {
+        const t = i / segments;
+        const jitter = i % 2 === 0 ? 1 : -1;
+        ctx.lineTo(x1 + dx * t + px * jitter, y1 + dy * t + py * jitter);
+      }
+      ctx.lineTo(x2, y2);
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 5;
+      ctx.stroke();
+      ctx.strokeStyle = COLORS.ironMining;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
+
+    function drawLightningBolts() {
+      for (const bolt of lightningBolts) {
+        if (!bolt.active) continue;
+        drawZigzagBolt(bolt.fromBall.x, bolt.fromBall.y, bolt.x, bolt.y);
+        ctx.beginPath();
+        ctx.arc(bolt.x, bolt.y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "#fff";
+        ctx.fill();
+      }
+    }
+
+    function drawElectricEffects(dt) {
+      for (let i = electricEffects.length - 1; i >= 0; i--) {
+        const e = electricEffects[i];
+        e.life -= dt * 1000;
+        e.alpha = clamp(e.life / 420, 0, 1);
+
+        ctx.save();
+        ctx.globalAlpha = e.alpha;
+        ctx.strokeStyle = COLORS.ironMining;
+        ctx.lineWidth = 4;
+        for (let j = 0; j < 3; j++) {
+          const angle = (j / 3) * Math.PI * 2 + e.life * 0.02;
+          const r = 18 + (420 - e.life) * 0.04;
+          ctx.beginPath();
+          ctx.moveTo(e.x, e.y);
+          ctx.lineTo(e.x + Math.cos(angle) * r, e.y + Math.sin(angle) * r);
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, 14, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255, 230, 80, 0.5)";
+        ctx.fill();
+        ctx.restore();
+
+        if (e.life <= 0) electricEffects.splice(i, 1);
+      }
+    }
+
     class Ball {
       constructor(config) {
         this.id = config.id;
@@ -375,6 +502,7 @@
             this.ironMiningTimeLeft = ABILITY.ironMiningDuration;
             this.abilityTimer = ABILITY.ironMiningInterval;
             spawnTextEffect(this.x, this.y - this.radius - 40, "IRON MINING!", COLORS.ironMining, 42);
+            if (blueBall) spawnLightning(this, blueBall);
           }
         }
       }
@@ -415,36 +543,12 @@
         ctx.save();
         this.drawTrail();
 
-        ctx.shadowColor = this.color;
-        ctx.shadowBlur = 28 + Math.sin(this.glowPhase) * 6;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius + 10, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.globalAlpha = 0.18;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.shadowBlur = 0;
-
-        const gradient = ctx.createRadialGradient(
-          this.x - this.radius * 0.3,
-          this.y - this.radius * 0.3,
-          this.radius * 0.1,
-          this.x,
-          this.y,
-          this.radius
-        );
-        gradient.addColorStop(0, this.color);
-        gradient.addColorStop(1, this.colorDark);
-
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.fillStyle = gradient;
+        ctx.fillStyle = this.color;
         ctx.fill();
         ctx.lineWidth = 7;
         ctx.strokeStyle = "#111";
-        ctx.stroke();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "rgba(255,255,255,0.45)";
         ctx.stroke();
 
         this.drawFace();
@@ -671,6 +775,8 @@
       damageNumbers = [];
       textEffects = [];
       impactFlashes = [];
+      lightningBolts = [];
+      electricEffects = [];
       gameOver = false;
       winner = null;
       screenShake.intensity = 0;
@@ -899,6 +1005,7 @@
           ball.update(dt);
         }
         resolveBallCollision(greenBall, blueBall);
+        updateLightning(dt);
       }
 
       const shake = getShakeOffset();
@@ -913,6 +1020,8 @@
         ball.draw();
       }
 
+      drawLightningBolts();
+      drawElectricEffects(dt);
       drawImpactFlashes(dt);
       drawDamageNumbers(dt);
       drawTextEffects(dt);
