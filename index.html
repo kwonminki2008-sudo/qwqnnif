@@ -194,7 +194,23 @@
       paladinKnockback: 720,
       collisionDuration: 1000,
       collisionSpeedMultiplier: 2,
-      arrowSpeed: 1320
+      arrowSpeed: 1320,
+      ninjaInterval: 6000,
+      ninjaDashDuration: 220,
+      ninjaDashSpeed: 2200,
+      ninjaSlashDamage: 18,
+      ninjaKnockback: 380,
+      frostInterval: 7000,
+      frostPrisonDuration: 1500,
+      frostPrisonRadius: 72,
+      frostPrisonDamage: 16,
+      frostSlowDuration: 2000,
+      frostSlowMultiplier: 0.5,
+      bomberInterval: 5000,
+      bomberFuseDuration: 1200,
+      bomberExplosionRadius: 88,
+      bomberExplosionDamage: 22,
+      bomberKnockback: 520
     };
 
     // ===== EDIT CHARACTERS HERE ONLY =====
@@ -304,6 +320,66 @@
         weaponOffsetY: 0,
         radius: 68,
         speed: 12
+      },
+      {
+        id: "ninja",
+        name: "Ninja",
+        teamColor: "#2c2c2c",
+        hp: 40,
+        baseDamage: 6,
+        abilityName: "SHADOW SLASH",
+        abilityCooldown: 6000,
+        abilityType: "ninja",
+        ballColor: "#2b2b2b",
+        weaponType: "katana",
+        weaponColor: "#bdc3c7",
+        weaponImage: "katana",
+        ballImage: null,
+        weaponScale: 1.8,
+        weaponOffsetX: 5,
+        weaponOffsetY: 0,
+        radius: 56,
+        speed: 13
+      },
+      {
+        id: "frost",
+        name: "Frost Mage",
+        teamColor: "#85c1e9",
+        hp: 42,
+        baseDamage: 5,
+        abilityName: "ICE PRISON",
+        abilityCooldown: 7000,
+        abilityType: "frost",
+        ballColor: "#a8d8f0",
+        weaponType: "staff",
+        weaponColor: "#5dade2",
+        weaponImage: "staff",
+        ballImage: null,
+        weaponScale: 1.9,
+        weaponOffsetX: 5,
+        weaponOffsetY: 0,
+        radius: 58,
+        speed: 9
+      },
+      {
+        id: "bomber",
+        name: "Bomber",
+        teamColor: "#e67e22",
+        hp: 50,
+        baseDamage: 5,
+        abilityName: "TIME BOMB",
+        abilityCooldown: 5000,
+        abilityType: "bomber",
+        ballColor: "#d35400",
+        weaponType: "bomb",
+        weaponColor: "#2c3e50",
+        weaponImage: "bomb",
+        ballImage: null,
+        weaponScale: 1.7,
+        weaponOffsetX: 5,
+        weaponOffsetY: 0,
+        radius: 60,
+        speed: 10
       }
     ];
     // ===== END CHARACTERS =====
@@ -321,6 +397,10 @@
     let bloodDrops = [];
     let excaliburDrops = [];
     let holyShockwaves = [];
+    let icePrisons = [];
+    let timeBombs = [];
+    let slashEffects = [];
+    let ninjaAfterimages = [];
     let gameOver = false;
     let winner = null;
     let winningBall = null;
@@ -435,6 +515,9 @@
 
     function getBallSpeedScale(ball) {
       let scale = getSpeedStatScale(ball.moveSpeed ?? PHYSICS.SPEED_STAT_BASELINE);
+      if (ball.slowTimeLeft > 0) {
+        scale *= ABILITY.frostSlowMultiplier;
+      }
       if (ball.collisionEffectTimeLeft > 0) {
         scale *= ABILITY.collisionSpeedMultiplier;
       }
@@ -695,13 +778,14 @@
       });
     }
 
-    function spawnImpactFlash(x, y, radius) {
+    function spawnImpactFlash(x, y, radius, tint) {
       impactFlashes.push({
         x,
         y,
         radius,
         alpha: 1,
-        life: 260
+        life: 260,
+        tint: tint || null
       });
     }
 
@@ -977,6 +1061,270 @@
         ctx.restore();
         if (s.life <= 0) holyShockwaves.splice(i, 1);
       }
+    }
+
+    function applySlow(ball) {
+      ball.slowTimeLeft = ABILITY.frostSlowDuration;
+    }
+
+    function startNinjaDash(ninja, opponent) {
+      ninja.shadowDashActive = true;
+      ninja.shadowDashTimeLeft = ABILITY.ninjaDashDuration;
+      ninja.shadowDashHit = false;
+      const dx = opponent.x - ninja.x;
+      const dy = opponent.y - ninja.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      ninja.vx = (dx / dist) * ABILITY.ninjaDashSpeed;
+      ninja.vy = (dy / dist) * ABILITY.ninjaDashSpeed;
+    }
+
+    function checkNinjaDashHit(ninja) {
+      if (!ninja.shadowDashActive || ninja.shadowDashHit) return;
+      const opponent = balls.find((b) => b !== ninja);
+      if (!opponent || opponent.hp <= 0) return;
+      if (Math.hypot(opponent.x - ninja.x, opponent.y - ninja.y) > ninja.radius + opponent.radius) return;
+      ninja.shadowDashHit = true;
+      applyDamage(opponent, ninja, ABILITY.ninjaSlashDamage);
+      const dx = opponent.x - ninja.x;
+      const dy = opponent.y - ninja.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      opponent.vx += (dx / dist) * ABILITY.ninjaKnockback;
+      opponent.vy += (dy / dist) * ABILITY.ninjaKnockback;
+      enforceSpeedLimits(opponent);
+      slashEffects.push({ x: opponent.x, y: opponent.y, life: 260, alpha: 1 });
+      spawnImpactFlash(opponent.x, opponent.y, 36);
+    }
+
+    function spawnIcePrison(fromBall, target) {
+      icePrisons.push({
+        fromBall,
+        x: target.x,
+        y: target.y,
+        radius: ABILITY.frostPrisonRadius,
+        timeLeft: ABILITY.frostPrisonDuration,
+        damageDealt: false,
+        active: true
+      });
+    }
+
+    function updateIcePrisons(dt) {
+      if (gameOver) return;
+      for (let i = icePrisons.length - 1; i >= 0; i--) {
+        const prison = icePrisons[i];
+        if (!prison.active) {
+          icePrisons.splice(i, 1);
+          continue;
+        }
+        prison.timeLeft -= dt * 1000;
+        for (const ball of balls) {
+          if (ball === prison.fromBall || ball.hp <= 0) continue;
+          const dist = Math.hypot(ball.x - prison.x, ball.y - prison.y);
+          if (dist <= prison.radius + ball.radius * 0.25 && !prison.damageDealt) {
+            prison.damageDealt = true;
+            applyDamage(ball, prison.fromBall, ABILITY.frostPrisonDamage);
+            applySlow(ball);
+            slashEffects.push({ x: ball.x, y: ball.y, life: 300, alpha: 1, ice: true });
+          }
+        }
+        if (prison.timeLeft <= 0) prison.active = false;
+      }
+    }
+
+    function spawnTimeBomb(fromBall) {
+      timeBombs.push({
+        fromBall,
+        x: fromBall.x,
+        y: fromBall.y,
+        fuseLeft: ABILITY.bomberFuseDuration,
+        active: true
+      });
+    }
+
+    function updateTimeBombs(dt) {
+      if (gameOver) return;
+      for (let i = timeBombs.length - 1; i >= 0; i--) {
+        const bomb = timeBombs[i];
+        if (!bomb.active) {
+          timeBombs.splice(i, 1);
+          continue;
+        }
+        bomb.fuseLeft -= dt * 1000;
+        if (bomb.fuseLeft > 0) continue;
+        bomb.active = false;
+        for (const ball of balls) {
+          if (ball === bomb.fromBall || ball.hp <= 0) continue;
+          const dist = Math.hypot(ball.x - bomb.x, ball.y - bomb.y);
+          if (dist <= ABILITY.bomberExplosionRadius + ball.radius * 0.35) {
+            applyDamage(ball, bomb.fromBall, ABILITY.bomberExplosionDamage);
+            const dx = ball.x - bomb.x;
+            const dy = ball.y - bomb.y;
+            const d = Math.hypot(dx, dy) || 1;
+            ball.vx += (dx / d) * ABILITY.bomberKnockback;
+            ball.vy += (dy / d) * ABILITY.bomberKnockback;
+            enforceSpeedLimits(ball);
+          }
+        }
+        spawnImpactFlash(bomb.x, bomb.y, ABILITY.bomberExplosionRadius * 0.85, "#e67e22");
+        spawnImpactFlash(bomb.x, bomb.y, ABILITY.bomberExplosionRadius * 0.45, "#ff9500");
+        triggerScreenShake(16, 240);
+      }
+    }
+
+    function drawIcePrisons() {
+      for (const prison of icePrisons) {
+        if (!prison.active) continue;
+        const t = clamp(prison.timeLeft / ABILITY.frostPrisonDuration, 0, 1);
+        ctx.save();
+        ctx.globalAlpha = 0.35 + t * 0.25;
+        ctx.strokeStyle = "#85c1e9";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(prison.x, prison.y, prison.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(133, 193, 233, 0.18)";
+        ctx.fill();
+        for (let i = 0; i < 4; i++) {
+          const angle = (i / 4) * Math.PI * 2 + Date.now() * 0.001;
+          const r = prison.radius * 0.55;
+          ctx.fillStyle = "rgba(255,255,255,0.65)";
+          ctx.beginPath();
+          ctx.arc(prison.x + Math.cos(angle) * r, prison.y + Math.sin(angle) * r, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+
+    function drawTimeBombs(dt) {
+      for (const bomb of timeBombs) {
+        if (!bomb.active) continue;
+        ctx.save();
+        ctx.translate(bomb.x, bomb.y);
+        ctx.fillStyle = "#2c3e50";
+        ctx.beginPath();
+        ctx.arc(0, 0, 14, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#111";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.strokeStyle = "#8b4513";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -14);
+        ctx.lineTo(0, -22);
+        ctx.stroke();
+        if (Math.sin(Date.now() * 0.02) > 0) {
+          ctx.fillStyle = "#ff9500";
+          ctx.beginPath();
+          ctx.arc(0, -24, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+
+    function drawSlashEffects(dt) {
+      for (let i = slashEffects.length - 1; i >= 0; i--) {
+        const s = slashEffects[i];
+        s.life -= dt * 1000;
+        s.alpha = clamp(s.life / 260, 0, 1);
+        ctx.save();
+        ctx.globalAlpha = s.alpha;
+        if (s.ice) {
+          ctx.strokeStyle = "#d6eaf8";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(s.x - 18, s.y - 12);
+          ctx.lineTo(s.x + 16, s.y + 14);
+          ctx.moveTo(s.x + 14, s.y - 14);
+          ctx.lineTo(s.x - 16, s.y + 12);
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(s.x - 20, s.y - 8);
+          ctx.lineTo(s.x + 18, s.y + 10);
+          ctx.stroke();
+          ctx.strokeStyle = "#9b59b6";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(s.x - 16, s.y - 4);
+          ctx.lineTo(s.x + 14, s.y + 6);
+          ctx.stroke();
+        }
+        ctx.restore();
+        if (s.life <= 0) slashEffects.splice(i, 1);
+      }
+    }
+
+    function drawNinjaAfterimages(dt) {
+      for (let i = ninjaAfterimages.length - 1; i >= 0; i--) {
+        const img = ninjaAfterimages[i];
+        img.life -= dt * 1000;
+        ctx.save();
+        ctx.globalAlpha = clamp(img.life / 180, 0, 1) * 0.35;
+        ctx.fillStyle = "#4a235a";
+        ctx.beginPath();
+        ctx.arc(img.x, img.y, img.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        if (img.life <= 0) ninjaAfterimages.splice(i, 1);
+      }
+    }
+
+    function drawKatana(x, y, scale) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-0.25);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = "#5c3a1e";
+      ctx.fillRect(-1.5, -2, 3, 10);
+      ctx.fillStyle = "#ecf0f1";
+      ctx.fillRect(-1, -12, 2, 10);
+      ctx.strokeStyle = "#95a5a6";
+      ctx.lineWidth = 0.8;
+      ctx.strokeRect(-1, -12, 2, 10);
+      ctx.restore();
+    }
+
+    function drawIceStaff(x, y, scale) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+      ctx.strokeStyle = "#5dade2";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, 8);
+      ctx.lineTo(0, -12);
+      ctx.stroke();
+      ctx.fillStyle = "#aed6f1";
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.lineTo(-4, -8);
+      ctx.lineTo(0, -4);
+      ctx.lineTo(4, -8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawHandBomb(x, y, scale) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = "#2c3e50";
+      ctx.beginPath();
+      ctx.arc(0, 0, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#111";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = "#ff9500";
+      ctx.beginPath();
+      ctx.arc(0, -7, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
 
     function spawnArrow(fromBall, toBall) {
@@ -1268,7 +1616,8 @@
         this.trail = [];
         this.collisionCooldown = 0;
         this.abilityCooldown = config.abilityCooldown ?? 0;
-        this.abilityTimer = (config.ability === "ironMining" || config.ability === "scissorhands" || config.ability === "paladin") ? this.abilityCooldown : 0;
+        const cdAbilities = ["ironMining", "scissorhands", "paladin", "ninja", "frost", "bomber"];
+        this.abilityTimer = cdAbilities.includes(config.ability) ? this.abilityCooldown : 0;
         this.ironMiningActive = false;
         this.ironMiningTimeLeft = 0;
         this.scissorActive = false;
@@ -1281,6 +1630,10 @@
         this.bleedTicksRemaining = 0;
         this.bleedSource = null;
         this.collisionEffectTimeLeft = 0;
+        this.shadowDashActive = false;
+        this.shadowDashTimeLeft = 0;
+        this.shadowDashHit = false;
+        this.slowTimeLeft = 0;
         this.awakenedEyeTimeLeft = 0;
         this.paralyzedTimeLeft = 0;
         this.savedVx = 0;
@@ -1325,7 +1678,9 @@
           triggerScreenShake(4, 80);
         }
 
-        enforceSpeedLimits(this);
+        if (!this.shadowDashActive) {
+          enforceSpeedLimits(this);
+        }
       }
 
       update(dt) {
@@ -1363,6 +1718,21 @@
           this.collisionEffectTimeLeft -= dt * 1000;
           if (this.collisionEffectTimeLeft <= 0) {
             this.collisionEffectTimeLeft = 0;
+            enforceSpeedLimits(this);
+          }
+        }
+
+        if (this.slowTimeLeft > 0) {
+          this.slowTimeLeft -= dt * 1000;
+          if (this.slowTimeLeft < 0) this.slowTimeLeft = 0;
+        }
+
+        if (this.shadowDashActive) {
+          ninjaAfterimages.push({ x: this.x, y: this.y, radius: this.radius * 0.85, life: 180 });
+          this.shadowDashTimeLeft -= dt * 1000;
+          checkNinjaDashHit(this);
+          if (this.shadowDashTimeLeft <= 0) {
+            this.shadowDashActive = false;
             enforceSpeedLimits(this);
           }
         }
@@ -1450,6 +1820,35 @@
           }
         }
 
+        if (this.ability === "ninja") {
+          this.abilityTimer -= dt * 1000;
+          if (this.abilityTimer <= 0 && !this.shadowDashActive) {
+            this.abilityTimer = ABILITY.ninjaInterval;
+            const opponent = balls.find((b) => b !== this);
+            if (opponent) startNinjaDash(this, opponent);
+            spawnTextEffect(this.x, this.y - this.radius - 40, "SHADOW SLASH!", "#9b59b6", 34);
+          }
+        }
+
+        if (this.ability === "frost") {
+          this.abilityTimer -= dt * 1000;
+          if (this.abilityTimer <= 0) {
+            this.abilityTimer = ABILITY.frostInterval;
+            const opponent = balls.find((b) => b !== this);
+            if (opponent) spawnIcePrison(this, opponent);
+            spawnTextEffect(this.x, this.y - this.radius - 40, "ICE PRISON!", "#85c1e9", 34);
+          }
+        }
+
+        if (this.ability === "bomber") {
+          this.abilityTimer -= dt * 1000;
+          if (this.abilityTimer <= 0) {
+            this.abilityTimer = ABILITY.bomberInterval;
+            spawnTimeBomb(this);
+            spawnTextEffect(this.x, this.y - this.radius - 40, "TIME BOMB!", "#e67e22", 34);
+          }
+        }
+
         if (this.ability === "archer") {
           const opponent = balls.find((b) => b !== this);
           updateArcherMeleeMode(this, opponent);
@@ -1501,6 +1900,78 @@
         ctx.arc(this.x - eyeOffset + lookX * 1.3, this.y - eyeOffset * 0.5 + lookY * 1.3, eyeR * 0.55, 0, Math.PI * 2);
         ctx.arc(this.x + eyeOffset + lookX * 1.3, this.y - eyeOffset * 0.5 + lookY * 1.3, eyeR * 0.55, 0, Math.PI * 2);
         ctx.fill();
+      }
+
+      drawNinjaHeadband() {
+        if (this.ability !== "ninja") return;
+        const r = this.radius;
+        ctx.save();
+        ctx.fillStyle = "#c0392b";
+        ctx.fillRect(this.x - r * 0.42, this.y - r * 0.38, r * 0.84, r * 0.1);
+        ctx.fillStyle = "#111";
+        ctx.fillRect(this.x - r * 0.1, this.y - r * 0.42, r * 0.2, r * 0.06);
+        ctx.restore();
+      }
+
+      drawFrostDetails() {
+        if (this.ability !== "frost") return;
+        const r = this.radius;
+        ctx.save();
+        ctx.globalAlpha = 0.35 + Math.sin(this.glowPhase * 2) * 0.12;
+        ctx.strokeStyle = "#85c1e9";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius + 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "#5dade2";
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y - r * 0.72);
+        ctx.lineTo(this.x - r * 0.28, this.y - r * 0.38);
+        ctx.lineTo(this.x + r * 0.28, this.y - r * 0.38);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "#2980b9";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      drawBomberDetails() {
+        if (this.ability !== "bomber") return;
+        const r = this.radius;
+        ctx.save();
+        ctx.fillStyle = "#2c3e50";
+        ctx.fillRect(this.x - r * 0.34, this.y - r * 0.18, r * 0.68, r * 0.22);
+        ctx.strokeStyle = "#111";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(this.x - r * 0.34, this.y - r * 0.18, r * 0.68, r * 0.22);
+        ctx.fillStyle = "#f39c12";
+        ctx.beginPath();
+        ctx.arc(this.x + r * 0.22, this.y - r * 0.08, r * 0.06, 0, Math.PI * 2);
+        ctx.fill();
+        if (Math.sin(this.glowPhase * 6) > 0) {
+          ctx.fillStyle = "#ff9500";
+          ctx.beginPath();
+          ctx.arc(this.x + r * 0.22, this.y - r * 0.18, r * 0.05, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      drawSlowEffect() {
+        if (this.slowTimeLeft <= 0) return;
+        ctx.save();
+        const pulse = 0.35 + Math.sin(this.glowPhase * 4) * 0.15;
+        ctx.globalAlpha = pulse;
+        for (let i = 0; i < 4; i++) {
+          const angle = this.glowPhase * 2 + (i / 4) * Math.PI * 2;
+          const dist = this.radius + 5 + Math.sin(this.glowPhase * 3 + i) * 2;
+          ctx.fillStyle = "rgba(174, 214, 241, 0.75)";
+          ctx.beginPath();
+          ctx.arc(this.x + Math.cos(angle) * dist, this.y + Math.sin(angle) * dist, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
       }
 
       drawPaladinHelmet() {
@@ -1679,8 +2150,19 @@
           ctx.stroke();
         }
 
+        this.drawNinjaHeadband();
+        this.drawFrostDetails();
+        this.drawBomberDetails();
         this.drawFace();
         this.drawPaladinHelmet();
+        if (this.shadowDashActive) {
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.glowPhase * 5) * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(155, 89, 182, ${0.55 + Math.sin(this.glowPhase * 4) * 0.2})`;
+          ctx.lineWidth = 4;
+          ctx.stroke();
+        }
+        this.drawSlowEffect();
         this.drawParalysisEffect();
         this.drawBleedEffect();
         this.drawCollisionEffect();
@@ -1731,6 +2213,12 @@
           drawScissorHand(0, 0, true, openAmt, this.weaponScale * 0.92, this.scissorActive);
         } else if (this.weapon === "excalibur" || this.ability === "paladin") {
           drawExcaliburBlade(0, 0, this.weaponScale * 0.85, false);
+        } else if (this.weapon === "katana" || this.ability === "ninja") {
+          drawKatana(0, 0, this.weaponScale);
+        } else if (this.weapon === "staff" || this.ability === "frost") {
+          drawIceStaff(0, 0, this.weaponScale);
+        } else if (this.weapon === "bomb" || this.ability === "bomber") {
+          drawHandBomb(0, 0, this.weaponScale);
         }
 
         ctx.restore();
@@ -1940,8 +2428,8 @@
         weaponScale: char.weaponScale,
         weaponOffsetX: char.weaponOffsetX,
         weaponOffsetY: char.weaponOffsetY,
-        ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : char.abilityType === "scissorhands" ? "scissorhands" : char.abilityType === "paladin" ? "paladin" : "normal",
-        abilityCooldown: char.abilityType === "paladin" ? (char.abilityCooldown || ABILITY.paladinInterval) : char.abilityType === "scissorhands" ? (char.abilityCooldown || ABILITY.scissorInterval) : char.abilityCooldown || ABILITY.ironMiningInterval,
+        ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : char.abilityType === "scissorhands" ? "scissorhands" : char.abilityType === "paladin" ? "paladin" : char.abilityType === "ninja" ? "ninja" : char.abilityType === "frost" ? "frost" : char.abilityType === "bomber" ? "bomber" : "normal",
+        abilityCooldown: char.abilityType === "paladin" ? (char.abilityCooldown || ABILITY.paladinInterval) : char.abilityType === "scissorhands" ? (char.abilityCooldown || ABILITY.scissorInterval) : char.abilityType === "ninja" ? (char.abilityCooldown || ABILITY.ninjaInterval) : char.abilityType === "frost" ? (char.abilityCooldown || ABILITY.frostInterval) : char.abilityType === "bomber" ? (char.abilityCooldown || ABILITY.bomberInterval) : char.abilityCooldown || ABILITY.ironMiningInterval,
         baseDamage: char.baseDamage,
         abilityDamage: char.abilityDamage,
         meleeDamage: char.meleeDamage,
@@ -2115,12 +2603,16 @@
       const midY = (a.y + b.y) / 2;
 
       if (a.collisionCooldown <= 0 && b.collisionCooldown <= 0) {
-          applyDamage(b, a, getAttackDamage(a, b), {
-            lifesteal: a.ability === "scissorhands" && a.scissorActive
-          });
-          applyDamage(a, b, getAttackDamage(b, a), {
-            lifesteal: b.ability === "scissorhands" && b.scissorActive
-          });
+          if (!(a.ability === "ninja" && a.shadowDashActive)) {
+            applyDamage(b, a, getAttackDamage(a, b), {
+              lifesteal: a.ability === "scissorhands" && a.scissorActive
+            });
+          }
+          if (!(b.ability === "ninja" && b.shadowDashActive)) {
+            applyDamage(a, b, getAttackDamage(b, a), {
+              lifesteal: b.ability === "scissorhands" && b.scissorActive
+            });
+          }
           spawnImpactFlash(midX, midY, minDist * 0.55);
           triggerScreenShake(14, 220);
 
@@ -2143,6 +2635,10 @@
       bloodDrops = [];
       excaliburDrops = [];
       holyShockwaves = [];
+      icePrisons = [];
+      timeBombs = [];
+      slashEffects = [];
+      ninjaAfterimages = [];
       gameOver = false;
       winner = null;
       winningBall = null;
@@ -2229,6 +2725,30 @@
           icon: "paladin"
         };
       }
+      if (ball.ability === "ninja") {
+        return {
+          ready: ball.abilityTimer <= 0 && !ball.shadowDashActive,
+          remainingMs: Math.max(0, ball.abilityTimer),
+          totalMs: ball.abilityCooldown || ABILITY.ninjaInterval,
+          icon: "ninja"
+        };
+      }
+      if (ball.ability === "frost") {
+        return {
+          ready: ball.abilityTimer <= 0,
+          remainingMs: Math.max(0, ball.abilityTimer),
+          totalMs: ball.abilityCooldown || ABILITY.frostInterval,
+          icon: "frost"
+        };
+      }
+      if (ball.ability === "bomber") {
+        return {
+          ready: ball.abilityTimer <= 0,
+          remainingMs: Math.max(0, ball.abilityTimer),
+          totalMs: ball.abilityCooldown || ABILITY.bomberInterval,
+          icon: "bomber"
+        };
+      }
       return { ready: true, remainingMs: 0, totalMs: 0, icon: "stick" };
     }
 
@@ -2285,6 +2805,51 @@
         ctx.fill();
         ctx.fillStyle = "#3498db";
         ctx.fillRect(-s * 0.18, -s * 0.05, s * 0.36, s * 0.08);
+      } else if (icon === "ninja") {
+        ctx.fillStyle = "#bdc3c7";
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.08, s * 0.35);
+        ctx.lineTo(0, -s * 0.45);
+        ctx.lineTo(s * 0.08, s * 0.35);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "#9b59b6";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.35, s * 0.05);
+        ctx.lineTo(s * 0.35, -s * 0.15);
+        ctx.stroke();
+      } else if (icon === "frost") {
+        ctx.strokeStyle = "#85c1e9";
+        ctx.lineWidth = 1.8;
+        for (let i = 0; i < 6; i++) {
+          const angle = (i / 6) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(angle) * s * 0.42, Math.sin(angle) * s * 0.42);
+          ctx.stroke();
+        }
+        ctx.fillStyle = "#aed6f1";
+        ctx.beginPath();
+        ctx.arc(0, 0, s * 0.1, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (icon === "bomber") {
+        ctx.fillStyle = "#2c3e50";
+        ctx.beginPath();
+        ctx.arc(0, s * 0.08, s * 0.28, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#111";
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.strokeStyle = "#8b4513";
+        ctx.beginPath();
+        ctx.moveTo(0, -s * 0.2);
+        ctx.lineTo(0, -s * 0.42);
+        ctx.stroke();
+        ctx.fillStyle = "#ff9500";
+        ctx.beginPath();
+        ctx.arc(0, -s * 0.46, s * 0.08, 0, Math.PI * 2);
+        ctx.fill();
       } else {
         ctx.strokeStyle = "#5c3a1e";
         ctx.lineWidth = 3;
@@ -2461,12 +3026,12 @@
         ctx.globalAlpha = f.alpha * 0.9;
         ctx.beginPath();
         ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = f.tint || "#ffffff";
         ctx.fill();
         ctx.globalAlpha = f.alpha * 0.45;
         ctx.beginPath();
         ctx.arc(f.x, f.y, f.radius * 0.55, 0, Math.PI * 2);
-        ctx.fillStyle = "#ffd700";
+        ctx.fillStyle = f.tint ? f.tint : "#ffd700";
         ctx.fill();
         ctx.restore();
 
@@ -2602,6 +3167,8 @@
         updateArrows(dt);
         updateBleed(dt);
         updateExcaliburDrops(dt);
+        updateIcePrisons(dt);
+        updateTimeBombs(dt);
       }
 
       const shake = getShakeOffset();
@@ -2611,10 +3178,15 @@
 
       drawArena();
       drawHeader();
+      drawIcePrisons();
+      drawNinjaAfterimages(dt);
 
       for (const ball of balls) {
         ball.draw();
       }
+
+      drawTimeBombs(dt);
+      drawSlashEffects(dt);
 
       drawLightningBolts();
       drawExcaliburDrops();
