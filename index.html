@@ -252,6 +252,7 @@
     let gameOver = false;
     let winner = null;
     let winningBall = null;
+    let isDraw = false;
     let gamePhase = "select";
     let selectedP1Id = "green";
     let selectedP2Id = "blue";
@@ -308,6 +309,7 @@
       gameOver = false;
       winner = null;
       winningBall = null;
+      isDraw = false;
       selectScreen.style.display = "flex";
       backToSelectBtn.style.display = "none";
     }
@@ -385,6 +387,30 @@
     function triggerScreenShake(intensity, duration) {
       screenShake.intensity = Math.max(screenShake.intensity, intensity);
       screenShake.duration = Math.max(screenShake.duration, duration);
+    }
+
+    function checkBattleEnd() {
+      if (gameOver || !greenBall || !blueBall) return;
+      const p1Dead = greenBall.hp <= 0;
+      const p2Dead = blueBall.hp <= 0;
+      if (!p1Dead && !p2Dead) return;
+
+      gameOver = true;
+      backToSelectBtn.style.display = "block";
+
+      if (p1Dead && p2Dead) {
+        isDraw = true;
+        winningBall = null;
+        winner = null;
+      } else if (p1Dead) {
+        isDraw = false;
+        winningBall = blueBall;
+        winner = blueBall.id;
+      } else {
+        isDraw = false;
+        winningBall = greenBall;
+        winner = greenBall.id;
+      }
     }
 
     function getArcherMeleeRange(attacker, defender) {
@@ -470,7 +496,8 @@
         fromBall,
         damage: fromBall.rangedDamage,
         life: 2500,
-        active: true
+        active: true,
+        trail: []
       });
     }
 
@@ -483,6 +510,8 @@
         }
 
         arrow.life -= dt * 1000;
+        arrow.trail.push({ x: arrow.x, y: arrow.y });
+        if (arrow.trail.length > 7) arrow.trail.shift();
         arrow.x += arrow.vx * dt;
         arrow.y += arrow.vy * dt;
 
@@ -509,12 +538,7 @@
           spawnImpactFlash(target.x, target.y, 40);
           arrow.active = false;
 
-          if (!gameOver && target.hp <= 0) {
-            gameOver = true;
-            winningBall = arrow.fromBall;
-            winner = winningBall.id;
-            backToSelectBtn.style.display = "block";
-          }
+          checkBattleEnd();
         }
       }
     }
@@ -522,21 +546,43 @@
     function drawArrows() {
       for (const arrow of arrows) {
         if (!arrow.active) continue;
+
         ctx.save();
+        for (let i = 0; i < arrow.trail.length; i++) {
+          const t = arrow.trail[i];
+          const p = (i + 1) / arrow.trail.length;
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, 4 + p * 3, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 180, 60, ${p * 0.35})`;
+          ctx.fill();
+        }
+
         const angle = Math.atan2(arrow.vy, arrow.vx);
         ctx.translate(arrow.x, arrow.y);
         ctx.rotate(angle);
-        ctx.fillStyle = "#e8dcc8";
-        ctx.fillRect(-12, -2, 18, 4);
-        ctx.fillStyle = "#888";
+        ctx.scale(1.8, 1.8);
+
+        ctx.fillStyle = "#ffb03a";
+        ctx.strokeStyle = "#1a1a1a";
+        ctx.lineWidth = 3;
+        ctx.fillRect(-14, -3.5, 24, 7);
+        ctx.strokeRect(-14, -3.5, 24, 7);
+
+        ctx.fillStyle = "#ddd";
         ctx.beginPath();
-        ctx.moveTo(6, 0);
-        ctx.lineTo(12, -4);
-        ctx.lineTo(12, 4);
+        ctx.moveTo(10, 0);
+        ctx.lineTo(18, -5);
+        ctx.lineTo(18, 5);
         ctx.closePath();
         ctx.fill();
+        ctx.stroke();
+
         ctx.fillStyle = "#5c3a1e";
-        ctx.fillRect(-14, -1, 4, 2);
+        ctx.fillRect(-18, -2, 5, 4);
+        ctx.strokeRect(-18, -2, 5, 4);
+
+        ctx.fillStyle = "#c44";
+        ctx.fillRect(-3, -1.5, 3, 3);
         ctx.restore();
       }
     }
@@ -607,12 +653,7 @@
           applyParalysis(target);
           bolt.active = false;
 
-          if (!gameOver && target.hp <= 0) {
-            gameOver = true;
-            winningBall = bolt.fromBall;
-            winner = winningBall.id;
-            backToSelectBtn.style.display = "block";
-          }
+          checkBattleEnd();
           continue;
         }
 
@@ -948,7 +989,7 @@
 
         if (this.ability === "archer") {
           if (this.archerMeleeMode) {
-            drawSword(0, 0, this.weaponScale);
+            drawDagger(0, 0, this.weaponScale);
           } else {
             drawBow(0, 0, this.weaponScale);
           }
@@ -1009,30 +1050,49 @@
       ctx.save();
       ctx.translate(x, y);
       ctx.scale(scale, scale);
-      ctx.strokeStyle = "#8b4513";
-      ctx.lineWidth = 3;
+
+      ctx.strokeStyle = "#5c3a1e";
+      ctx.lineWidth = 4;
+      ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.arc(0, 0, 14, -Math.PI * 0.45, Math.PI * 0.45);
+      ctx.arc(-2, 0, 16, Math.PI * 0.55, Math.PI * 1.45);
       ctx.stroke();
-      ctx.strokeStyle = "#ccc";
+      ctx.beginPath();
+      ctx.arc(2, 0, 16, -Math.PI * 0.45, Math.PI * 0.45);
+      ctx.stroke();
+
+      ctx.strokeStyle = "#ddd";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.lineTo(0, 14);
+      ctx.stroke();
+
+      ctx.fillStyle = "#6b4f1d";
+      ctx.fillRect(-3, -5, 6, 10);
+      ctx.strokeStyle = "#3d2614";
       ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, -10);
-      ctx.lineTo(0, 10);
-      ctx.stroke();
+      ctx.strokeRect(-3, -5, 6, 10);
+
       ctx.restore();
     }
 
-    function drawSword(x, y, scale) {
+    function drawDagger(x, y, scale) {
       ctx.save();
       ctx.translate(x, y);
-      ctx.rotate(-0.3);
+      ctx.rotate(-0.35);
       ctx.scale(scale, scale);
+
       ctx.fillStyle = "#ccc";
-      ctx.fillRect(-2, -14, 4, 22);
-      ctx.fillStyle = "#8b4513";
-      ctx.fillRect(-4, 6, 8, 4);
-      ctx.fillRect(-1, 10, 2, 6);
+      ctx.fillRect(-1.5, -10, 3, 12);
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-1.5, -10, 3, 12);
+
+      ctx.fillStyle = "#5c3a1e";
+      ctx.fillRect(-3, 2, 6, 5);
+      ctx.fillRect(-1, 7, 2, 3);
+
       ctx.restore();
     }
 
@@ -1149,12 +1209,7 @@
         frozen.collisionCooldown = PHYSICS.hitCooldownMs;
         mover.collisionCooldown = PHYSICS.hitCooldownMs;
 
-        if (frozen.hp <= 0) {
-          gameOver = true;
-          winningBall = mover;
-          winner = winningBall.id;
-          backToSelectBtn.style.display = "block";
-        }
+        checkBattleEnd();
       }
 
       return true;
@@ -1236,18 +1291,7 @@
           a.collisionCooldown = PHYSICS.hitCooldownMs;
           b.collisionCooldown = PHYSICS.hitCooldownMs;
 
-          if (a.hp <= 0 || b.hp <= 0) {
-            gameOver = true;
-            if (a.hp <= 0 && b.hp <= 0) {
-              winningBall = a.maxHp <= b.maxHp ? a : b;
-            } else if (a.hp <= 0) {
-              winningBall = b;
-            } else {
-              winningBall = a;
-            }
-            winner = winningBall.id;
-            backToSelectBtn.style.display = "block";
-          }
+          checkBattleEnd();
       }
     }
 
@@ -1261,6 +1305,7 @@
       gameOver = false;
       winner = null;
       winningBall = null;
+      isDraw = false;
       screenShake.intensity = 0;
       screenShake.duration = 0;
       backToSelectBtn.style.display = "none";
@@ -1451,19 +1496,29 @@
     }
 
     function drawWinScreen() {
-      if (!gameOver || !winningBall) return;
+      if (!gameOver) return;
 
       ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
       ctx.fillRect(0, 0, W, H);
-
-      const winBall = winningBall;
-      const winText = winBall.displayName + " WINS";
-      const winColor = winBall.color;
 
       ctx.font = "bold 96px Courier New, monospace";
       ctx.textAlign = "center";
       ctx.strokeStyle = COLORS.black;
       ctx.lineWidth = 10;
+
+      if (isDraw) {
+        ctx.strokeText("DRAW", W / 2, H / 2);
+        ctx.fillStyle = COLORS.white;
+        ctx.fillText("DRAW", W / 2, H / 2 - 40);
+        return;
+      }
+
+      if (!winningBall) return;
+
+      const winBall = winningBall;
+      const winText = winBall.displayName + " WINS";
+      const winColor = winBall.color;
+
       ctx.strokeText(winText, W / 2, H / 2);
       ctx.fillStyle = winColor;
       ctx.fillText(winText, W / 2, H / 2 - 40);
