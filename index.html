@@ -178,7 +178,11 @@
       scissorSpeedMultiplier: 1.5,
       scissorAbilityDamage: 10,
       bleedDuration: 3000,
-      bleedDamagePerSecond: 4
+      bleedDamagePerSecond: 4,
+      scissorLifestealRatio: 0.5,
+      archerMeleeEnterPad: 32,
+      archerMeleeExitPad: 56,
+      archerModeFlashMs: 400
     };
 
     // ===== EDIT CHARACTERS HERE ONLY =====
@@ -277,6 +281,7 @@
     let electricEffects = [];
     let arrows = [];
     let chompEffects = [];
+    let bloodDrops = [];
     let gameOver = false;
     let winner = null;
     let winningBall = null;
@@ -454,7 +459,28 @@
     }
 
     function getArcherMeleeRange(attacker, defender) {
-      return attacker.radius + defender.radius + 32;
+      return attacker.radius + defender.radius + ABILITY.archerMeleeEnterPad;
+    }
+
+    function getArcherMeleeExitRange(attacker, defender) {
+      return attacker.radius + defender.radius + ABILITY.archerMeleeExitPad;
+    }
+
+    function updateArcherMeleeMode(archer, opponent) {
+      if (!opponent) {
+        archer.archerMeleeMode = false;
+        return;
+      }
+      const dist = Math.hypot(archer.x - opponent.x, archer.y - opponent.y);
+      if (archer.archerMeleeMode) {
+        if (dist > getArcherMeleeExitRange(archer, opponent)) {
+          archer.archerMeleeMode = false;
+          archer.archerModeFlash = ABILITY.archerModeFlashMs;
+        }
+      } else if (dist <= getArcherMeleeRange(archer, opponent)) {
+        archer.archerMeleeMode = true;
+        archer.archerModeFlash = ABILITY.archerModeFlashMs;
+      }
     }
 
     function isMirrorMatch() {
@@ -470,12 +496,12 @@
 
     function isArcherInMelee(attacker, defender) {
       if (!defender || attacker.ability !== "archer") return false;
-      return Math.hypot(attacker.x - defender.x, attacker.y - defender.y) <= getArcherMeleeRange(attacker, defender);
+      return attacker.archerMeleeMode;
     }
 
     function getAttackDamage(attacker, defender) {
       if (attacker.ability === "archer" && defender) {
-        if (isArcherInMelee(attacker, defender)) {
+        if (attacker.archerMeleeMode) {
           return Math.round(attacker.meleeDamage * attacker.damageMultiplier);
         }
         return attacker.rangedDamage;
@@ -495,6 +521,51 @@
 
     function computeHitDamage(attacker, defender) {
       return computeReceivedDamage(defender, getAttackDamage(attacker, defender));
+    }
+
+    function spawnHealNumber(ball, amount) {
+      damageNumbers.push({
+        x: ball.x + rand(-10, 10),
+        y: ball.y - ball.radius * 0.3,
+        text: "+" + Math.round(amount),
+        color: "#2ecc40",
+        alpha: 1,
+        vy: -100,
+        life: 900,
+        scale: 0.75
+      });
+    }
+
+    function applyScissorLifesteal(healer, actualDamage) {
+      const heal = Math.round(actualDamage * ABILITY.scissorLifestealRatio);
+      if (heal <= 0) return;
+      const before = healer.hp;
+      healer.hp = Math.min(healer.maxHp, healer.hp + heal);
+      const actualHeal = healer.hp - before;
+      if (actualHeal > 0) spawnHealNumber(healer, actualHeal);
+    }
+
+    function applyDamage(victim, attacker, rawDamage, options = {}) {
+      const actual = computeReceivedDamage(victim, rawDamage);
+      if (actual <= 0) return 0;
+
+      victim.hp -= actual;
+
+      if (options.bleedTick) {
+        spawnBleedDamageNumber(victim, actual);
+        spawnBloodDrop(victim.x, victim.y);
+      } else if (options.lightning) {
+        spawnLightningDamageNumber(victim, actual);
+      } else if (options.damageNumber !== false) {
+        spawnDamageNumber(victim, attacker, actual);
+      }
+
+      if (options.lifesteal && attacker && attacker.ability === "scissorhands") {
+        applyScissorLifesteal(attacker, actual);
+      }
+
+      checkBattleEnd();
+      return actual;
     }
 
     function spawnDamageNumber(victim, attacker, amount) {
@@ -550,10 +621,25 @@
       });
     }
 
-    function applyBleed(victim) {
+    function spawnBloodDrop(x, y) {
+      for (let i = 0; i < 2; i++) {
+        bloodDrops.push({
+          x: x + rand(-12, 12),
+          y: y + rand(-6, 10),
+          vx: rand(-35, 35),
+          vy: rand(35, 85),
+          life: 520,
+          alpha: 1,
+          size: rand(2.5, 4.5)
+        });
+      }
+    }
+
+    function applyBleed(victim, source) {
       victim.bleedTimeLeft = ABILITY.bleedDuration;
       victim.bleedTickTimer = 0;
       victim.bleedTicksRemaining = 3;
+      victim.bleedSource = source;
     }
 
     function spawnChompEffect(x, y) {
@@ -562,7 +648,7 @@
 
     function handleScissorSkillHit(attacker, victim) {
       if (attacker.ability !== "scissorhands" || !attacker.scissorActive) return;
-      applyBleed(victim);
+      applyBleed(victim, attacker);
       spawnChompEffect(victim.x, victim.y);
     }
 
@@ -575,14 +661,16 @@
         while (ball.bleedTickTimer >= 1000 && ball.bleedTicksRemaining > 0) {
           ball.bleedTickTimer -= 1000;
           ball.bleedTicksRemaining--;
-          ball.hp -= ABILITY.bleedDamagePerSecond;
-          spawnBleedDamageNumber(ball, ABILITY.bleedDamagePerSecond);
-          checkBattleEnd();
+          applyDamage(ball, ball.bleedSource, ABILITY.bleedDamagePerSecond, {
+            bleedTick: true,
+            lifesteal: true
+          });
           if (gameOver) return;
         }
         if (ball.bleedTimeLeft <= 0) {
           ball.bleedTicksRemaining = 0;
           ball.bleedTickTimer = 0;
+          ball.bleedSource = null;
         }
       }
     }
@@ -636,13 +724,9 @@
         const dx = target.x - arrow.x;
         const dy = target.y - arrow.y;
         if (Math.hypot(dx, dy) <= target.radius + 8) {
-          const damage = computeReceivedDamage(target, arrow.damage);
-          target.hp -= damage;
-          spawnDamageNumber(target, arrow.fromBall, damage);
+          applyDamage(target, arrow.fromBall, arrow.damage);
           spawnImpactFlash(target.x, target.y, 40);
           arrow.active = false;
-
-          checkBattleEnd();
         }
       }
     }
@@ -746,16 +830,12 @@
         const dist = Math.hypot(dx, dy) || 1;
 
         if (dist <= target.radius + 12) {
-          const lightningDamage = computeReceivedDamage(target, ABILITY.lightningDamage);
-          target.hp -= lightningDamage;
-          spawnLightningDamageNumber(target, lightningDamage);
+          applyDamage(target, bolt.fromBall, ABILITY.lightningDamage, { lightning: true });
           spawnElectricEffect(target.x, target.y);
           spawnImpactFlash(target.x, target.y, 52);
           spawnImpactFlash(target.x, target.y, 28);
           applyParalysis(target);
           bolt.active = false;
-
-          checkBattleEnd();
           continue;
         }
 
@@ -865,6 +945,7 @@
         this.projectileCooldown = config.projectileCooldown ?? 3000;
         this.projectileTimer = config.ability === "archer" ? this.projectileCooldown : 0;
         this.archerMeleeMode = false;
+        this.archerModeFlash = 0;
         this.weaponAngle = Math.atan2(config.vy, config.vx);
         this.glowPhase = 0;
         this.trail = [];
@@ -880,6 +961,7 @@
         this.bleedTimeLeft = 0;
         this.bleedTickTimer = 0;
         this.bleedTicksRemaining = 0;
+        this.bleedSource = null;
         this.awakenedEyeTimeLeft = 0;
         this.paralyzedTimeLeft = 0;
         this.savedVx = 0;
@@ -1031,7 +1113,10 @@
 
         if (this.ability === "archer") {
           const opponent = balls.find((b) => b !== this);
-          this.archerMeleeMode = opponent ? isArcherInMelee(this, opponent) : false;
+          updateArcherMeleeMode(this, opponent);
+          if (this.archerModeFlash > 0) {
+            this.archerModeFlash -= dt * 1000;
+          }
           if (opponent && !this.archerMeleeMode) {
             this.projectileTimer -= dt * 1000;
             if (this.projectileTimer <= 0) {
@@ -1194,10 +1279,8 @@
         ctx.translate(offset, this.weaponOffsetY);
 
         if (this.ability === "archer") {
-          const opponent = balls.find((b) => b !== this);
-          const inMelee = opponent && isArcherInMelee(this, opponent);
-          if (inMelee) {
-            drawDagger(0, 0, this.weaponScale);
+          if (this.archerMeleeMode) {
+            drawDagger(0, 0, this.weaponScale, true);
           } else {
             drawBow(0, 0, this.weaponScale);
           }
@@ -1342,21 +1425,36 @@
       ctx.restore();
     }
 
-    function drawDagger(x, y, scale) {
+    function drawDagger(x, y, scale, emphasized) {
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(-0.35);
-      ctx.scale(scale, scale);
+      const drawScale = emphasized ? scale * 1.18 : scale;
+      ctx.scale(drawScale, drawScale);
 
-      ctx.fillStyle = "#ccc";
+      if (emphasized) {
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(0, -12);
+        ctx.lineTo(0, 8);
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = emphasized ? "#e8e8e8" : "#ccc";
       ctx.fillRect(-1.5, -10, 3, 12);
-      ctx.strokeStyle = "#333";
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = emphasized ? "#222" : "#333";
+      ctx.lineWidth = emphasized ? 1.5 : 1;
       ctx.strokeRect(-1.5, -10, 3, 12);
 
       ctx.fillStyle = "#5c3a1e";
       ctx.fillRect(-3, 2, 6, 5);
       ctx.fillRect(-1, 7, 2, 3);
+
+      if (emphasized) {
+        ctx.fillStyle = "rgba(255, 215, 0, 0.35)";
+        ctx.fillRect(-1, -9, 2, 8);
+      }
 
       ctx.restore();
     }
@@ -1467,17 +1565,15 @@
       const midY = (a.y + b.y) / 2;
 
       if (frozen.collisionCooldown <= 0 && mover.collisionCooldown <= 0) {
-        const damage = computeHitDamage(mover, frozen);
-        frozen.hp -= damage;
-        spawnDamageNumber(frozen, mover, damage);
+        applyDamage(frozen, mover, getAttackDamage(mover, frozen), {
+          lifesteal: mover.ability === "scissorhands" && mover.scissorActive
+        });
         spawnImpactFlash(midX, midY, (a.radius + b.radius) * 0.55);
         triggerScreenShake(14, 220);
         frozen.collisionCooldown = PHYSICS.hitCooldownMs;
         mover.collisionCooldown = PHYSICS.hitCooldownMs;
 
         handleScissorSkillHit(mover, frozen);
-
-        checkBattleEnd();
       }
 
       return true;
@@ -1545,14 +1641,12 @@
       const midY = (a.y + b.y) / 2;
 
       if (a.collisionCooldown <= 0 && b.collisionCooldown <= 0) {
-          const damageToB = computeHitDamage(a, b);
-          const damageToA = computeHitDamage(b, a);
-
-          b.hp -= damageToB;
-          a.hp -= damageToA;
-
-          spawnDamageNumber(b, a, damageToB);
-          spawnDamageNumber(a, b, damageToA);
+          applyDamage(b, a, getAttackDamage(a, b), {
+            lifesteal: a.ability === "scissorhands" && a.scissorActive
+          });
+          applyDamage(a, b, getAttackDamage(b, a), {
+            lifesteal: b.ability === "scissorhands" && b.scissorActive
+          });
           spawnImpactFlash(midX, midY, minDist * 0.55);
           triggerScreenShake(14, 220);
 
@@ -1561,8 +1655,6 @@
 
           handleScissorSkillHit(a, b);
           handleScissorSkillHit(b, a);
-
-          checkBattleEnd();
       }
     }
 
@@ -1574,6 +1666,7 @@
       electricEffects = [];
       arrows = [];
       chompEffects = [];
+      bloodDrops = [];
       gameOver = false;
       winner = null;
       winningBall = null;
@@ -1675,13 +1768,25 @@
 
       ctx.textAlign = isLeft ? "left" : "right";
       ctx.font = "bold 28px Courier New, monospace";
-      ctx.fillStyle = "#cccccc";
-      ctx.strokeStyle = COLORS.black;
-      ctx.lineWidth = 3;
       const dmgX = isLeft ? x : x + barW;
-      const dmgLabel = "DMG: " + getAttackDamage(ball, opponent);
-      ctx.strokeText(dmgLabel, dmgX, barY + barH + 34);
-      ctx.fillText(dmgLabel, dmgX, barY + barH + 34);
+      const dmgValue = getAttackDamage(ball, opponent);
+      const archerFlashing = ball.ability === "archer" && ball.archerModeFlash > 0;
+      if (ball.ability === "archer") {
+        const modeLabel = ball.archerMeleeMode ? "DAGGER" : "BOW";
+        const dmgLabel = modeLabel + " DMG: " + dmgValue;
+        ctx.fillStyle = archerFlashing ? (ball.archerMeleeMode ? "#ffd700" : "#7fdbff") : "#cccccc";
+        ctx.strokeStyle = COLORS.black;
+        ctx.lineWidth = archerFlashing ? 4 : 3;
+        ctx.strokeText(dmgLabel, dmgX, barY + barH + 34);
+        ctx.fillText(dmgLabel, dmgX, barY + barH + 34);
+      } else {
+        ctx.fillStyle = "#cccccc";
+        ctx.strokeStyle = COLORS.black;
+        ctx.lineWidth = 3;
+        const dmgLabel = "DMG: " + dmgValue;
+        ctx.strokeText(dmgLabel, dmgX, barY + barH + 34);
+        ctx.fillText(dmgLabel, dmgX, barY + barH + 34);
+      }
 
       if (ball.ironMiningActive) {
         ctx.textAlign = "center";
@@ -1813,6 +1918,31 @@
       }
     }
 
+    function drawBloodDrops(dt) {
+      for (let i = bloodDrops.length - 1; i >= 0; i--) {
+        const b = bloodDrops[i];
+        b.life -= dt * 1000;
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        b.vy += 140 * dt;
+        b.alpha = clamp(b.life / 520, 0, 1);
+
+        ctx.save();
+        ctx.globalAlpha = b.alpha * 0.9;
+        ctx.fillStyle = "#c0392b";
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(139, 0, 0, 0.55)";
+        ctx.beginPath();
+        ctx.arc(b.x, b.y + b.size * 0.6, b.size * 0.55, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        if (b.life <= 0) bloodDrops.splice(i, 1);
+      }
+    }
+
     function drawWinScreen() {
       if (!gameOver) return;
 
@@ -1899,6 +2029,7 @@
       drawArrows();
       drawElectricEffects(dt);
       drawChompEffects(dt);
+      drawBloodDrops(dt);
       drawImpactFlashes(dt);
       drawDamageNumbers(dt);
       drawTextEffects(dt);
