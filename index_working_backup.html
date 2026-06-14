@@ -118,41 +118,6 @@
       ironMiningDamageMultiplier: 2.6
     };
 
-    // ===== EDIT CHARACTERS HERE ONLY =====
-    const CHARACTERS = [
-      {
-        id: "green",
-        name: "GREEN",
-        color: "#2ecc40",
-        hp: 41,
-        damage: 5.2,
-        abilityName: "IRON MINING",
-        abilityCooldown: 5000,
-        ballImage: null,
-        weaponImage: "pickaxe",
-        weaponScale: 2.2,
-        weaponOffsetX: 6,
-        weaponOffsetY: 0
-      },
-      {
-        id: "blue",
-        name: "BLUE",
-        color: "#0074d9",
-        hp: 95,
-        damage: 3.8,
-        abilityName: "NORMAL",
-        abilityCooldown: 0,
-        ballImage: null,
-        weaponImage: "stick",
-        weaponScale: 2.4,
-        weaponOffsetX: 6,
-        weaponOffsetY: 0
-      }
-    ];
-    // ===== END CHARACTERS =====
-
-    const RADIUS_BY_ID = { green: 58, blue: 72 };
-
     let damageNumbers = [];
     let textEffects = [];
     let impactFlashes = [];
@@ -162,8 +127,6 @@
     let greenBall;
     let blueBall;
     let balls = [];
-    let fighterA;
-    let fighterB;
 
     const screenShake = { intensity: 0, duration: 0 };
 
@@ -180,18 +143,6 @@
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
       return from + diff * t;
-    }
-
-    function darkenColor(hex, factor) {
-      const n = parseInt(hex.slice(1), 16);
-      const r = Math.floor(((n >> 16) & 255) * factor);
-      const g = Math.floor(((n >> 8) & 255) * factor);
-      const b = Math.floor((n & 255) * factor);
-      return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-    }
-
-    function pickBattleCharacters() {
-      return [CHARACTERS[0], CHARACTERS[1]];
     }
 
     function getMass(ball) {
@@ -235,15 +186,16 @@
       const dy = attacker.y - victim.y;
       const dist = Math.hypot(dx, dy) || 1;
       const towardAttacker = victim.radius * 0.42;
+      const color = attacker.name === "green" ? COLORS.green : COLORS.blue;
+
       damageNumbers.push({
         x: victim.x + (dx / dist) * towardAttacker,
         y: victim.y + (dy / dist) * towardAttacker - victim.radius * 0.25,
         text: "-" + Math.round(amount),
-        color: attacker.color,
+        color,
         alpha: 1,
-        vy: -200,
-        life: 1400,
-        scale: 1.15
+        vy: -180,
+        life: 1300
       });
     }
 
@@ -269,16 +221,14 @@
         x,
         y,
         radius,
-        alpha: 1,
-        life: 260
+        alpha: 0.85,
+        life: 180
       });
     }
 
     class Ball {
       constructor(config) {
-        this.id = config.id;
-        this.name = config.id;
-        this.displayName = config.displayName;
+        this.name = config.name;
         this.color = config.color;
         this.colorDark = config.colorDark;
         this.x = config.x;
@@ -289,16 +239,12 @@
         this.hp = config.hp;
         this.maxHp = config.hp;
         this.weapon = config.weapon;
-        this.weaponScale = config.weaponScale;
-        this.weaponOffsetX = config.weaponOffsetX;
-        this.weaponOffsetY = config.weaponOffsetY;
         this.ability = config.ability;
         this.baseDamage = config.baseDamage;
         this.weaponAngle = Math.atan2(config.vy, config.vx);
         this.glowPhase = 0;
-        this.trail = [];
         this.collisionCooldown = 0;
-        this.abilityTimer = config.ability === "ironMining" ? config.abilityCooldown : 0;
+        this.abilityTimer = config.ability === "ironMining" ? ABILITY.ironMiningInterval : 0;
         this.ironMiningActive = false;
         this.ironMiningTimeLeft = 0;
       }
@@ -347,8 +293,6 @@
 
         this.x += this.vx * dt;
         this.y += this.vy * dt;
-        this.trail.push({ x: this.x, y: this.y });
-        if (this.trail.length > 14) this.trail.shift();
         this.bounceOffWalls();
 
         const targetAngle = Math.atan2(this.vy, this.vx);
@@ -379,51 +323,8 @@
         }
       }
 
-      drawTrail() {
-        for (let i = 0; i < this.trail.length; i++) {
-          const t = this.trail[i];
-          const p = (i + 1) / this.trail.length;
-          ctx.beginPath();
-          ctx.arc(t.x, t.y, this.radius * (0.35 + p * 0.45), 0, Math.PI * 2);
-          ctx.fillStyle = this.color;
-          ctx.globalAlpha = p * 0.28;
-          ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-      }
-
-      drawFace() {
-        const eyeOffset = this.radius * 0.28;
-        const eyeR = this.radius * 0.11;
-        const lookX = clamp(this.vx / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
-        const lookY = clamp(this.vy / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
-
-        ctx.fillStyle = "#fff";
-        ctx.beginPath();
-        ctx.arc(this.x - eyeOffset + lookX, this.y - eyeOffset * 0.5 + lookY, eyeR, 0, Math.PI * 2);
-        ctx.arc(this.x + eyeOffset + lookX, this.y - eyeOffset * 0.5 + lookY, eyeR, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = "#111";
-        ctx.beginPath();
-        ctx.arc(this.x - eyeOffset + lookX * 1.3, this.y - eyeOffset * 0.5 + lookY * 1.3, eyeR * 0.55, 0, Math.PI * 2);
-        ctx.arc(this.x + eyeOffset + lookX * 1.3, this.y - eyeOffset * 0.5 + lookY * 1.3, eyeR * 0.55, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
       draw() {
         ctx.save();
-        this.drawTrail();
-
-        ctx.shadowColor = this.color;
-        ctx.shadowBlur = 28 + Math.sin(this.glowPhase) * 6;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius + 10, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.globalAlpha = 0.18;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.shadowBlur = 0;
 
         const gradient = ctx.createRadialGradient(
           this.x - this.radius * 0.3,
@@ -440,20 +341,15 @@
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fillStyle = gradient;
         ctx.fill();
-        ctx.lineWidth = 7;
-        ctx.strokeStyle = "#111";
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(0,0,0,0.35)";
         ctx.stroke();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "rgba(255,255,255,0.45)";
-        ctx.stroke();
-
-        this.drawFace();
 
         if (this.ironMiningActive) {
           ctx.beginPath();
-          ctx.arc(this.x, this.y, this.radius + 12 + Math.sin(this.glowPhase * 2) * 4, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(255, 215, 0, ${0.7 + Math.sin(this.glowPhase * 3) * 0.25})`;
-          ctx.lineWidth = 7;
+          ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.glowPhase * 2) * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255, 215, 0, ${0.55 + Math.sin(this.glowPhase * 3) * 0.25})`;
+          ctx.lineWidth = 5;
           ctx.stroke();
         }
 
@@ -466,20 +362,21 @@
         ctx.translate(this.x, this.y);
         ctx.rotate(this.weaponAngle);
 
-        const offset = this.radius + this.weaponOffsetX;
-        ctx.translate(offset, this.weaponOffsetY);
+        const offset = this.radius + 6;
+        ctx.translate(offset, 0);
 
         if (this.weapon === "pickaxe") {
-          drawPickaxe(0, 0, this.ironMiningActive, this.weaponScale);
+          drawPickaxe(0, 0, this.ironMiningActive);
         } else if (this.weapon === "stick") {
-          drawStick(0, 0, this.weaponScale);
+          drawStick(0, 0);
         }
 
         ctx.restore();
       }
     }
 
-    function drawPickaxe(x, y, powered, scale) {
+    function drawPickaxe(x, y, powered) {
+      const scale = 2.2;
       ctx.save();
       ctx.translate(x, y);
       ctx.scale(scale, scale);
@@ -507,7 +404,8 @@
       ctx.restore();
     }
 
-    function drawStick(x, y, scale) {
+    function drawStick(x, y) {
+      const scale = 2.4;
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(-0.4);
@@ -522,46 +420,36 @@
       ctx.restore();
     }
 
-    function createBallFromCharacter(char, x, y, vx, vy) {
-      return new Ball({
-        id: char.id,
-        displayName: char.name,
-        color: char.color,
-        colorDark: darkenColor(char.color, 0.62),
-        x,
-        y,
-        vx,
-        vy,
-        radius: RADIUS_BY_ID[char.id] || 60,
-        hp: char.hp,
-        weapon: char.weaponImage,
-        weaponScale: char.weaponScale,
-        weaponOffsetX: char.weaponOffsetX,
-        weaponOffsetY: char.weaponOffsetY,
-        ability: char.abilityName === "IRON MINING" ? "ironMining" : "normal",
-        abilityCooldown: char.abilityCooldown || ABILITY.ironMiningInterval,
-        baseDamage: char.damage
-      });
-    }
-
     function createBalls() {
-      [fighterA, fighterB] = pickBattleCharacters();
+      greenBall = new Ball({
+        name: "green",
+        color: COLORS.green,
+        colorDark: COLORS.greenDark,
+        x: ARENA.x + ARENA.w * 0.35,
+        y: ARENA.y + ARENA.h * 0.4,
+        vx: 380,
+        vy: 300,
+        radius: 58,
+        hp: 41,
+        weapon: "pickaxe",
+        ability: "ironMining",
+        baseDamage: 5.2
+      });
 
-      greenBall = createBallFromCharacter(
-        fighterA,
-        ARENA.x + ARENA.w * 0.35,
-        ARENA.y + ARENA.h * 0.4,
-        380,
-        300
-      );
-
-      blueBall = createBallFromCharacter(
-        fighterB,
-        ARENA.x + ARENA.w * 0.65,
-        ARENA.y + ARENA.h * 0.6,
-        -360,
-        -320
-      );
+      blueBall = new Ball({
+        name: "blue",
+        color: COLORS.blue,
+        colorDark: COLORS.blueDark,
+        x: ARENA.x + ARENA.w * 0.65,
+        y: ARENA.y + ARENA.h * 0.6,
+        vx: -360,
+        vy: -320,
+        radius: 72,
+        hp: 95,
+        weapon: "stick",
+        ability: "normal",
+        baseDamage: 3.8
+      });
 
       balls = [greenBall, blueBall];
     }
@@ -686,95 +574,66 @@
       ctx.fillStyle = COLORS.white;
       ctx.fillRect(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
 
-      for (let i = 4; i >= 1; i--) {
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.08 * i})`;
-        ctx.lineWidth = 4 + i * 3;
-        ctx.strokeRect(
-          ARENA.x - i * 2,
-          ARENA.y - i * 2,
-          ARENA.w + i * 4,
-          ARENA.h + i * 4
-        );
-      }
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 5;
+      ctx.strokeStyle = "#cccccc";
+      ctx.lineWidth = 6;
       ctx.strokeRect(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
     }
 
     function drawHeader() {
-      ctx.textAlign = "center";
-      ctx.font = "bold 78px Courier New, monospace";
       ctx.fillStyle = COLORS.white;
-      ctx.strokeStyle = COLORS.black;
-      ctx.lineWidth = 6;
-      ctx.strokeText("BALL BATTLE", W / 2, 130);
-      ctx.fillText("BALL BATTLE", W / 2, 130);
+      ctx.font = "bold 52px Courier New, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("BALL BATTLE", W / 2, 120);
 
-      if (greenBall && blueBall) {
-        ctx.font = "bold 34px Courier New, monospace";
-        ctx.fillStyle = greenBall.color;
-        ctx.fillText(greenBall.displayName, W / 2 - 180, 210);
-        ctx.fillStyle = "#666";
-        ctx.fillText("VS", W / 2, 210);
-        ctx.fillStyle = blueBall.color;
-        ctx.fillText(blueBall.displayName, W / 2 + 180, 210);
-      }
+      ctx.font = "28px Courier New, monospace";
+      ctx.fillStyle = "#888888";
+      ctx.fillText("YouTube Shorts Simulation", W / 2, 170);
+
+      ctx.font = "24px Courier New, monospace";
+      ctx.textAlign = "left";
+      ctx.fillStyle = COLORS.green;
+      ctx.fillText("GREEN — Pickaxe | IRON MINING (5s)", 90, 230);
+      ctx.fillStyle = COLORS.blue;
+      ctx.fillText("BLUE — Stick | NORMAL", 90, 260);
     }
 
     function drawHpBar() {
-      const barY = ARENA.y + ARENA.h + 90;
-      const barW = 400;
-      const barH = 44;
-      const leftX = 80;
-      const rightX = W - 80 - barW;
+      const barY = ARENA.y + ARENA.h + 80;
+      const barW = 380;
+      const barH = 36;
 
-      drawSingleHp(greenBall, leftX, barY, barW, barH, true);
-      drawSingleHp(blueBall, rightX, barY, barW, barH, false);
+      ctx.font = "bold 36px Courier New, monospace";
+      ctx.textAlign = "center";
+
+      const greenCenterX = W / 2 - 220;
+      const blueCenterX = W / 2 + 220;
+
+      drawSingleHp(greenBall, greenCenterX, barY, barW, barH, COLORS.hpGreen, "GREEN");
+      drawSingleHp(blueBall, blueCenterX, barY, barW, barH, COLORS.hpBlue, "BLUE");
     }
 
-    function drawSingleHp(ball, x, barY, barW, barH, isLeft) {
-      const hp = Math.max(0, Math.ceil(ball.hp));
-      const ratio = clamp(ball.hp / ball.maxHp, 0, 1);
-      const color = ball.color;
+    function drawSingleHp(ball, centerX, barY, barW, barH, color, label) {
+      const x = centerX - barW / 2;
 
-      ctx.textAlign = isLeft ? "left" : "right";
-      ctx.font = "bold 40px Courier New, monospace";
       ctx.fillStyle = color;
-      ctx.strokeStyle = COLORS.black;
-      ctx.lineWidth = 4;
-      const labelX = isLeft ? x : x + barW;
-      ctx.strokeText(ball.displayName, labelX, barY - 18);
-      ctx.fillText(ball.displayName, labelX, barY - 18);
+      ctx.fillText(`${label}: ${Math.max(0, Math.ceil(ball.hp))} HP`, centerX, barY - 16);
 
-      ctx.font = "bold 48px Courier New, monospace";
-      const hpX = isLeft ? x + barW : x;
-      ctx.textAlign = isLeft ? "right" : "left";
-      ctx.strokeText(String(hp), hpX, barY - 18);
-      ctx.fillText(String(hp), hpX, barY - 18);
-
-      ctx.fillStyle = "#1a1a1a";
+      ctx.fillStyle = "#222222";
       ctx.fillRect(x, barY, barW, barH);
 
-      const fillW = barW * ratio;
-      const fillX = isLeft ? x : x + barW - fillW;
+      const ratio = clamp(ball.hp / ball.maxHp, 0, 1);
       ctx.fillStyle = color;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 16;
-      ctx.fillRect(fillX, barY, fillW, barH);
-      ctx.shadowBlur = 0;
+      ctx.fillRect(x, barY, barW * ratio, barH);
 
-      ctx.strokeStyle = "rgba(255,255,255,0.85)";
-      ctx.lineWidth = 4;
+      ctx.strokeStyle = COLORS.white;
+      ctx.lineWidth = 3;
       ctx.strokeRect(x, barY, barW, barH);
 
       if (ball.ironMiningActive) {
-        ctx.textAlign = "center";
-        ctx.font = "bold 30px Courier New, monospace";
+        ctx.font = "bold 22px Courier New, monospace";
         ctx.fillStyle = COLORS.ironMining;
-        ctx.strokeStyle = COLORS.black;
-        ctx.lineWidth = 5;
-        ctx.strokeText("IRON MINING!", x + barW / 2, barY + barH + 38);
-        ctx.fillText("IRON MINING!", x + barW / 2, barY + barH + 38);
+        ctx.fillText("MINING!", centerX, barY + barH + 30);
+        ctx.font = "bold 36px Courier New, monospace";
       }
     }
 
@@ -788,18 +647,14 @@
 
         ctx.save();
         ctx.globalAlpha = d.alpha;
-        const scale = d.scale || 1;
-        ctx.font = `bold ${Math.round(64 * scale)}px Courier New, monospace`;
+        ctx.font = "bold 58px Courier New, monospace";
         ctx.fillStyle = d.color;
         ctx.strokeStyle = COLORS.black;
-        ctx.lineWidth = 8;
-        ctx.shadowColor = d.color;
-        ctx.shadowBlur = 14;
+        ctx.lineWidth = 6;
         ctx.lineJoin = "round";
         ctx.textAlign = "center";
         ctx.strokeText(d.text, d.x, d.y);
         ctx.fillText(d.text, d.x, d.y);
-        ctx.shadowBlur = 0;
         ctx.restore();
 
         if (d.life <= 0) damageNumbers.splice(i, 1);
@@ -832,19 +687,14 @@
       for (let i = impactFlashes.length - 1; i >= 0; i--) {
         const f = impactFlashes[i];
         f.life -= dt * 1000;
-        f.alpha = clamp(f.life / 260, 0, 1);
-        f.radius += dt * 200;
+        f.alpha = clamp(f.life / 180, 0, 1) * 0.85;
+        f.radius += dt * 120;
 
         ctx.save();
-        ctx.globalAlpha = f.alpha * 0.9;
+        ctx.globalAlpha = f.alpha;
         ctx.beginPath();
         ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
         ctx.fillStyle = "#ffffff";
-        ctx.fill();
-        ctx.globalAlpha = f.alpha * 0.45;
-        ctx.beginPath();
-        ctx.arc(f.x, f.y, f.radius * 0.55, 0, Math.PI * 2);
-        ctx.fillStyle = "#ffd700";
         ctx.fill();
         ctx.restore();
 
@@ -858,9 +708,8 @@
       ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
       ctx.fillRect(0, 0, W, H);
 
-      const winBall = winner === greenBall.id ? greenBall : blueBall;
-      const winText = winBall.displayName + " WINS";
-      const winColor = winBall.color;
+      const winText = winner === "green" ? "GREEN WINS" : "BLUE WINS";
+      const winColor = winner === "green" ? COLORS.green : COLORS.blue;
 
       ctx.font = "bold 96px Courier New, monospace";
       ctx.textAlign = "center";
