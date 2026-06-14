@@ -250,6 +250,7 @@
       {
         id: "scissorhands",
         name: "Scissorhands",
+        shortName: "Scissors",
         teamColor: "#c0392b",
         hp: 50,
         baseDamage: 7,
@@ -483,15 +484,65 @@
       }
     }
 
+    function getCharacterShortName(char) {
+      return char.shortName || char.name;
+    }
+
+    function getBallBattleLabel(ball) {
+      return ball.battleLabel || ball.displayName;
+    }
+
     function isMirrorMatch() {
-      return greenBall && blueBall && greenBall.displayName === blueBall.displayName;
+      return greenBall && blueBall && greenBall.id === blueBall.id;
     }
 
     function formatPlayerName(ball, isP1) {
+      const label = getBallBattleLabel(ball);
       if (isMirrorMatch()) {
-        return (isP1 ? "1P " : "2P ") + ball.displayName;
+        return (isP1 ? "1P " : "2P ") + label;
       }
-      return ball.displayName;
+      return label;
+    }
+
+    function drawOutlinedText(text, x, y, fillStyle, strokeStyle, lineWidth) {
+      ctx.strokeStyle = strokeStyle;
+      ctx.lineWidth = lineWidth;
+      ctx.strokeText(text, x, y);
+      ctx.fillStyle = fillStyle;
+      ctx.fillText(text, x, y);
+    }
+
+    function drawFittedOutlinedText(text, x, y, maxWidth, baseFontSize, family, fillStyle, align) {
+      let size = baseFontSize;
+      ctx.textAlign = align;
+      while (size > 16) {
+        ctx.font = `bold ${size}px ${family}`;
+        if (ctx.measureText(text).width <= maxWidth) break;
+        size -= 2;
+      }
+      drawOutlinedText(text, x, y, fillStyle, COLORS.black, Math.max(3, size / 10));
+    }
+
+    function drawCenteredWinLines(lines, color, centerY) {
+      const maxWidth = W - 100;
+      const family = "Courier New, monospace";
+      let fontSize = lines.length > 1 ? 72 : 96;
+
+      function allFit(size) {
+        ctx.font = `bold ${size}px ${family}`;
+        return lines.every((line) => ctx.measureText(line).width <= maxWidth);
+      }
+
+      while (fontSize > 28 && !allFit(fontSize)) fontSize -= 4;
+
+      ctx.textAlign = "center";
+      const lineHeight = fontSize * 1.08;
+      const startY = centerY - 40 - ((lines.length - 1) * lineHeight) / 2;
+
+      for (let i = 0; i < lines.length; i++) {
+        ctx.font = `bold ${fontSize}px ${family}`;
+        drawOutlinedText(lines[i], W / 2, startY + i * lineHeight, color, COLORS.black, Math.max(4, fontSize / 10));
+      }
     }
 
     function isArcherInMelee(attacker, defender) {
@@ -925,6 +976,7 @@
         this.id = config.id;
         this.name = config.id;
         this.displayName = config.displayName;
+        this.battleLabel = config.battleLabel || config.displayName;
         this.color = config.color;
         this.colorDark = config.colorDark;
         this.x = config.x;
@@ -1463,6 +1515,7 @@
       return new Ball({
         id: char.id,
         displayName: char.name,
+        battleLabel: getCharacterShortName(char),
         color: char.ballColor,
         colorDark: darkenColor(char.ballColor, 0.62),
         x,
@@ -1709,13 +1762,14 @@
       ctx.fillText("BALL BATTLE", W / 2, 130);
 
       if (greenBall && blueBall) {
+        const family = "Courier New, monospace";
+        const p1Label = formatPlayerName(greenBall, true);
+        const p2Label = formatPlayerName(blueBall, false);
+        drawFittedOutlinedText(p1Label, W / 2 - 210, 210, 360, 34, family, greenBall.color, "right");
+        ctx.textAlign = "center";
         ctx.font = "bold 34px Courier New, monospace";
-        ctx.fillStyle = greenBall.color;
-        ctx.fillText(formatPlayerName(greenBall, true), W / 2 - 180, 210);
-        ctx.fillStyle = "#666";
-        ctx.fillText("VS", W / 2, 210);
-        ctx.fillStyle = blueBall.color;
-        ctx.fillText(formatPlayerName(blueBall, false), W / 2 + 180, 210);
+        drawOutlinedText("VS", W / 2, 210, "#666", COLORS.black, 3);
+        drawFittedOutlinedText(p2Label, W / 2 + 210, 210, 360, 34, family, blueBall.color, "left");
       }
     }
 
@@ -1734,22 +1788,18 @@
       const hp = Math.max(0, Math.ceil(ball.hp));
       const ratio = clamp(ball.hp / ball.maxHp, 0, 1);
       const color = ball.color;
-
-      ctx.textAlign = isLeft ? "left" : "right";
-      ctx.font = "bold 40px Courier New, monospace";
-      ctx.fillStyle = color;
-      ctx.strokeStyle = COLORS.black;
-      ctx.lineWidth = 4;
-      const labelX = isLeft ? x : x + barW;
+      const family = "Courier New, monospace";
+      const nameRowY = barY - 56;
+      const hpRowY = barY - 18;
+      const dmgRowY = barY + barH + 28;
       const nameLabel = formatPlayerName(ball, isLeft);
-      ctx.strokeText(nameLabel, labelX, barY - 18);
-      ctx.fillText(nameLabel, labelX, barY - 18);
+      const nameX = isLeft ? x : x + barW;
 
-      ctx.font = "bold 48px Courier New, monospace";
-      const hpX = isLeft ? x + barW : x;
-      ctx.textAlign = isLeft ? "right" : "left";
-      ctx.strokeText(String(hp), hpX, barY - 18);
-      ctx.fillText(String(hp), hpX, barY - 18);
+      drawFittedOutlinedText(nameLabel, nameX, nameRowY, barW, 32, family, color, isLeft ? "left" : "right");
+
+      ctx.textAlign = "center";
+      ctx.font = "bold 44px Courier New, monospace";
+      drawOutlinedText(String(hp), x + barW / 2, hpRowY, color, COLORS.black, 4);
 
       ctx.fillStyle = "#1a1a1a";
       ctx.fillRect(x, barY, barW, barH);
@@ -1766,44 +1816,25 @@
       ctx.lineWidth = 4;
       ctx.strokeRect(x, barY, barW, barH);
 
-      ctx.textAlign = isLeft ? "left" : "right";
-      ctx.font = "bold 28px Courier New, monospace";
       const dmgX = isLeft ? x : x + barW;
       const dmgValue = getAttackDamage(ball, opponent);
       const archerFlashing = ball.ability === "archer" && ball.archerModeFlash > 0;
+      const dmgFill = archerFlashing ? (ball.archerMeleeMode ? "#ffd700" : "#7fdbff") : "#cccccc";
       if (ball.ability === "archer") {
         const modeLabel = ball.archerMeleeMode ? "DAGGER" : "BOW";
-        const dmgLabel = modeLabel + " DMG: " + dmgValue;
-        ctx.fillStyle = archerFlashing ? (ball.archerMeleeMode ? "#ffd700" : "#7fdbff") : "#cccccc";
-        ctx.strokeStyle = COLORS.black;
-        ctx.lineWidth = archerFlashing ? 4 : 3;
-        ctx.strokeText(dmgLabel, dmgX, barY + barH + 34);
-        ctx.fillText(dmgLabel, dmgX, barY + barH + 34);
+        drawFittedOutlinedText(modeLabel + " DMG: " + dmgValue, dmgX, dmgRowY, barW, 26, family, dmgFill, isLeft ? "left" : "right");
       } else {
-        ctx.fillStyle = "#cccccc";
-        ctx.strokeStyle = COLORS.black;
-        ctx.lineWidth = 3;
-        const dmgLabel = "DMG: " + dmgValue;
-        ctx.strokeText(dmgLabel, dmgX, barY + barH + 34);
-        ctx.fillText(dmgLabel, dmgX, barY + barH + 34);
+        drawFittedOutlinedText("DMG: " + dmgValue, dmgX, dmgRowY, barW, 26, family, "#cccccc", isLeft ? "left" : "right");
       }
 
       if (ball.ironMiningActive) {
         ctx.textAlign = "center";
-        ctx.font = "bold 30px Courier New, monospace";
-        ctx.fillStyle = COLORS.ironMining;
-        ctx.strokeStyle = COLORS.black;
-        ctx.lineWidth = 5;
-        ctx.strokeText("IRON MINING!", x + barW / 2, barY + barH + 72);
-        ctx.fillText("IRON MINING!", x + barW / 2, barY + barH + 72);
+        ctx.font = "bold 28px Courier New, monospace";
+        drawOutlinedText("IRON MINING!", x + barW / 2, barY + barH + 62, COLORS.ironMining, COLORS.black, 4);
       } else if (ball.scissorActive) {
         ctx.textAlign = "center";
-        ctx.font = "bold 30px Courier New, monospace";
-        ctx.fillStyle = "#e74c3c";
-        ctx.strokeStyle = COLORS.black;
-        ctx.lineWidth = 5;
-        ctx.strokeText("SCISSOR FRENZY!", x + barW / 2, barY + barH + 72);
-        ctx.fillText("SCISSOR FRENZY!", x + barW / 2, barY + barH + 72);
+        ctx.font = "bold 28px Courier New, monospace";
+        drawOutlinedText("SCISSOR FRENZY!", x + barW / 2, barY + barH + 62, "#e74c3c", COLORS.black, 4);
       }
     }
 
@@ -1949,29 +1980,30 @@
       ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
       ctx.fillRect(0, 0, W, H);
 
-      ctx.font = "bold 96px Courier New, monospace";
-      ctx.textAlign = "center";
-      ctx.strokeStyle = COLORS.black;
-      ctx.lineWidth = 10;
-
       if (isDraw) {
-        ctx.strokeText("DRAW", W / 2, H / 2);
-        ctx.fillStyle = COLORS.white;
-        ctx.fillText("DRAW", W / 2, H / 2 - 40);
+        drawCenteredWinLines(["DRAW"], COLORS.white, H / 2);
         return;
       }
 
       if (!winningBall) return;
 
       const winBall = winningBall;
-      const winText = isMirrorMatch()
-        ? (winningBall === greenBall ? "1P " : "2P ") + winBall.displayName + " WINS"
-        : winBall.displayName + " WINS";
       const winColor = winBall.color;
+      const battleLabel = getBallBattleLabel(winBall);
+      const family = "Courier New, monospace";
+      const singleLine = (isMirrorMatch()
+        ? (winningBall === greenBall ? "1P " : "2P ") + battleLabel
+        : battleLabel) + " WINS";
 
-      ctx.strokeText(winText, W / 2, H / 2);
-      ctx.fillStyle = winColor;
-      ctx.fillText(winText, W / 2, H / 2 - 40);
+      ctx.font = `bold 96px ${family}`;
+      if (ctx.measureText(singleLine).width <= W - 100) {
+        drawCenteredWinLines([singleLine], winColor, H / 2);
+      } else if (isMirrorMatch()) {
+        const prefix = winningBall === greenBall ? "1P " : "2P ";
+        drawCenteredWinLines([prefix + battleLabel, "WINS"], winColor, H / 2);
+      } else {
+        drawCenteredWinLines([battleLabel, "WINS"], winColor, H / 2);
+      }
     }
 
     function updateScreenShake(dt) {
