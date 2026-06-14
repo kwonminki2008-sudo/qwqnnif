@@ -172,7 +172,13 @@
       ironMiningDamageMultiplier: 2,
       ironMiningDamageReduction: 0.6,
       lightningDamage: 5,
-      paralysisDuration: 1000
+      paralysisDuration: 1000,
+      scissorInterval: 3500,
+      scissorDuration: 1500,
+      scissorSpeedMultiplier: 1.5,
+      scissorAbilityDamage: 10,
+      bleedDuration: 3000,
+      bleedDamagePerSecond: 4
     };
 
     // ===== EDIT CHARACTERS HERE ONLY =====
@@ -236,6 +242,27 @@
         weaponOffsetY: 0,
         radius: 58,
         projectileCooldown: 3000
+      },
+      {
+        id: "scissorhands",
+        name: "Scissorhands",
+        teamColor: "#c0392b",
+        hp: 50,
+        baseDamage: 7,
+        abilityDamage: 10,
+        abilityName: "SCISSOR FRENZY",
+        abilityCooldown: 3500,
+        abilityDuration: 1500,
+        abilityType: "scissorhands",
+        ballColor: "#c0392b",
+        weaponType: "scissors",
+        weaponColor: "#bdc3c7",
+        weaponImage: "scissors",
+        ballImage: null,
+        weaponScale: 1.7,
+        weaponOffsetX: 4,
+        weaponOffsetY: 0,
+        radius: 60
       }
     ];
     // ===== END CHARACTERS =====
@@ -249,6 +276,7 @@
     let lightningBolts = [];
     let electricEffects = [];
     let arrows = [];
+    let chompEffects = [];
     let gameOver = false;
     let winner = null;
     let winningBall = null;
@@ -357,28 +385,40 @@
       return ball.radius * ball.radius;
     }
 
+    function getSpeedLimits(ball) {
+      if (ball.scissorActive) {
+        return {
+          minSpeed: PHYSICS.minSpeed * ABILITY.scissorSpeedMultiplier,
+          maxSpeed: PHYSICS.maxSpeed * ABILITY.scissorSpeedMultiplier
+        };
+      }
+      return { minSpeed: PHYSICS.minSpeed, maxSpeed: PHYSICS.maxSpeed };
+    }
+
     function enforceSpeedLimits(ball) {
+      const limits = getSpeedLimits(ball);
       let speed = Math.hypot(ball.vx, ball.vy);
-      if (speed < PHYSICS.minSpeed) {
+      if (speed < limits.minSpeed) {
         if (speed < 1) {
           const angle = rand(0, Math.PI * 2);
-          ball.vx = Math.cos(angle) * PHYSICS.minSpeed;
-          ball.vy = Math.sin(angle) * PHYSICS.minSpeed;
+          ball.vx = Math.cos(angle) * limits.minSpeed;
+          ball.vy = Math.sin(angle) * limits.minSpeed;
         } else {
-          const scale = PHYSICS.minSpeed / speed;
+          const scale = limits.minSpeed / speed;
           ball.vx *= scale;
           ball.vy *= scale;
         }
-      } else if (speed > PHYSICS.maxSpeed) {
-        const scale = PHYSICS.maxSpeed / speed;
+      } else if (speed > limits.maxSpeed) {
+        const scale = limits.maxSpeed / speed;
         ball.vx *= scale;
         ball.vy *= scale;
       }
     }
 
     function preserveSpeedWithJitter(ball, preSpeed) {
-      let speed = Math.max(preSpeed, PHYSICS.minSpeed);
-      speed = Math.min(speed, PHYSICS.maxSpeed);
+      const limits = getSpeedLimits(ball);
+      let speed = Math.max(preSpeed, limits.minSpeed);
+      speed = Math.min(speed, limits.maxSpeed);
       let angle = Math.atan2(ball.vy, ball.vx) + rand(-PHYSICS.angleJitter, PHYSICS.angleJitter);
       ball.vx = Math.cos(angle) * speed;
       ball.vy = Math.sin(angle) * speed;
@@ -440,6 +480,9 @@
         }
         return attacker.rangedDamage;
       }
+      if (attacker.ability === "scissorhands") {
+        return attacker.scissorActive ? attacker.abilityDamage : attacker.baseDamage;
+      }
       return Math.round(attacker.baseDamage * attacker.damageMultiplier);
     }
 
@@ -492,6 +535,56 @@
         alpha: 1,
         life: 260
       });
+    }
+
+    function spawnBleedDamageNumber(victim, amount) {
+      damageNumbers.push({
+        x: victim.x + rand(-12, 12),
+        y: victim.y - victim.radius * 0.15,
+        text: "-" + Math.round(amount),
+        color: "#e74c3c",
+        alpha: 1,
+        vy: -120,
+        life: 900,
+        scale: 0.72
+      });
+    }
+
+    function applyBleed(victim) {
+      victim.bleedTimeLeft = ABILITY.bleedDuration;
+      victim.bleedTickTimer = 0;
+      victim.bleedTicksRemaining = 3;
+    }
+
+    function spawnChompEffect(x, y) {
+      chompEffects.push({ x, y, life: 320, alpha: 1, phase: 0 });
+    }
+
+    function handleScissorSkillHit(attacker, victim) {
+      if (attacker.ability !== "scissorhands" || !attacker.scissorActive) return;
+      applyBleed(victim);
+      spawnChompEffect(victim.x, victim.y);
+    }
+
+    function updateBleed(dt) {
+      if (gameOver) return;
+      for (const ball of balls) {
+        if (ball.bleedTimeLeft <= 0) continue;
+        ball.bleedTimeLeft -= dt * 1000;
+        ball.bleedTickTimer += dt * 1000;
+        while (ball.bleedTickTimer >= 1000 && ball.bleedTicksRemaining > 0) {
+          ball.bleedTickTimer -= 1000;
+          ball.bleedTicksRemaining--;
+          ball.hp -= ABILITY.bleedDamagePerSecond;
+          spawnBleedDamageNumber(ball, ABILITY.bleedDamagePerSecond);
+          checkBattleEnd();
+          if (gameOver) return;
+        }
+        if (ball.bleedTimeLeft <= 0) {
+          ball.bleedTicksRemaining = 0;
+          ball.bleedTickTimer = 0;
+        }
+      }
     }
 
     function spawnArrow(fromBall, toBall) {
@@ -776,9 +869,17 @@
         this.glowPhase = 0;
         this.trail = [];
         this.collisionCooldown = 0;
-        this.abilityTimer = config.ability === "ironMining" ? config.abilityCooldown : 0;
+        this.abilityTimer = (config.ability === "ironMining" || config.ability === "scissorhands") ? config.abilityCooldown : 0;
         this.ironMiningActive = false;
         this.ironMiningTimeLeft = 0;
+        this.scissorActive = false;
+        this.scissorTimeLeft = 0;
+        this.abilityDamage = config.abilityDamage ?? ABILITY.scissorAbilityDamage;
+        this.scissorPhase = 0;
+        this.scissorSlashFlash = 0;
+        this.bleedTimeLeft = 0;
+        this.bleedTickTimer = 0;
+        this.bleedTicksRemaining = 0;
         this.awakenedEyeTimeLeft = 0;
         this.paralyzedTimeLeft = 0;
         this.savedVx = 0;
@@ -887,6 +988,47 @@
           }
         }
 
+        if (this.ability === "scissorhands") {
+          this.abilityTimer -= dt * 1000;
+
+          if (this.scissorActive) {
+            this.scissorTimeLeft -= dt * 1000;
+            this.scissorPhase += dt * 14;
+            if (this.scissorTimeLeft <= 0) {
+              this.scissorActive = false;
+              const speed = Math.hypot(this.vx, this.vy);
+              if (speed > 1) {
+                const angle = Math.atan2(this.vy, this.vx);
+                const newSpeed = Math.min(speed / ABILITY.scissorSpeedMultiplier, PHYSICS.maxSpeed);
+                this.vx = Math.cos(angle) * newSpeed;
+                this.vy = Math.sin(angle) * newSpeed;
+              }
+              enforceSpeedLimits(this);
+            }
+          }
+
+          if (this.abilityTimer <= 0 && !this.scissorActive) {
+            this.scissorActive = true;
+            this.scissorTimeLeft = ABILITY.scissorDuration;
+            this.abilityTimer = ABILITY.scissorInterval;
+            this.scissorSlashFlash = 280;
+            this.scissorPhase = 0;
+            spawnTextEffect(this.x, this.y - this.radius - 40, "SCISSOR FRENZY!", "#e74c3c", 38);
+            const speed = Math.hypot(this.vx, this.vy);
+            if (speed > 1) {
+              const angle = Math.atan2(this.vy, this.vx);
+              const newSpeed = Math.min(speed * ABILITY.scissorSpeedMultiplier, PHYSICS.maxSpeed * ABILITY.scissorSpeedMultiplier);
+              this.vx = Math.cos(angle) * newSpeed;
+              this.vy = Math.sin(angle) * newSpeed;
+            }
+            enforceSpeedLimits(this);
+          }
+
+          if (this.scissorSlashFlash > 0) {
+            this.scissorSlashFlash -= dt * 1000;
+          }
+        }
+
         if (this.ability === "archer") {
           const opponent = balls.find((b) => b !== this);
           this.archerMeleeMode = opponent ? isArcherInMelee(this, opponent) : false;
@@ -961,6 +1103,51 @@
         ctx.restore();
       }
 
+      drawBleedEffect() {
+        if (this.bleedTimeLeft <= 0) return;
+
+        ctx.save();
+        const pulse = 0.28 + Math.sin(this.glowPhase * 5) * 0.12;
+        ctx.globalAlpha = pulse;
+        ctx.strokeStyle = "#c0392b";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius + 7, 0, Math.PI * 2);
+        ctx.stroke();
+        for (let i = 0; i < 3; i++) {
+          const angle = this.glowPhase * 2 + (i / 3) * Math.PI * 2;
+          const r = this.radius + 4 + Math.sin(this.glowPhase * 4 + i) * 3;
+          ctx.fillStyle = "rgba(192, 57, 43, 0.55)";
+          ctx.beginPath();
+          ctx.arc(this.x + Math.cos(angle) * r, this.y + Math.sin(angle) * r, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      drawScissorSlashFlash() {
+        if (this.scissorSlashFlash <= 0) return;
+
+        ctx.save();
+        const t = this.scissorSlashFlash / 280;
+        ctx.globalAlpha = t * 0.85;
+        ctx.strokeStyle = "#e74c3c";
+        ctx.lineWidth = 4;
+        const slashAngle = this.weaponAngle + 0.6;
+        const len = this.radius + 22;
+        ctx.beginPath();
+        ctx.moveTo(this.x + Math.cos(slashAngle) * (this.radius - 4), this.y + Math.sin(slashAngle) * (this.radius - 4));
+        ctx.lineTo(this.x + Math.cos(slashAngle) * len, this.y + Math.sin(slashAngle) * len);
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(this.x + Math.cos(slashAngle - 0.15) * (this.radius - 2), this.y + Math.sin(slashAngle - 0.15) * (this.radius - 2));
+        ctx.lineTo(this.x + Math.cos(slashAngle - 0.15) * (len - 8), this.y + Math.sin(slashAngle - 0.15) * (len - 8));
+        ctx.stroke();
+        ctx.restore();
+      }
+
       draw() {
         ctx.save();
         this.drawTrail();
@@ -975,6 +1162,7 @@
 
         this.drawFace();
         this.drawParalysisEffect();
+        this.drawBleedEffect();
 
         if (this.ironMiningActive) {
           ctx.beginPath();
@@ -984,6 +1172,15 @@
           ctx.stroke();
         }
 
+        if (this.scissorActive) {
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius + 10 + Math.sin(this.glowPhase * 3) * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(231, 76, 60, ${0.55 + Math.sin(this.glowPhase * 4) * 0.2})`;
+          ctx.lineWidth = 5;
+          ctx.stroke();
+        }
+
+        this.drawScissorSlashFlash();
         this.drawWeapon();
         ctx.restore();
       }
@@ -1008,10 +1205,73 @@
           drawPickaxe(0, 0, this.ironMiningActive, this.weaponScale);
         } else if (this.weapon === "stick") {
           drawStick(0, 0, this.weaponScale);
+        } else if (this.weapon === "scissors" || this.ability === "scissorhands") {
+          const openAmt = this.scissorActive ? (Math.sin(this.scissorPhase) + 1) / 2 : 0.12;
+          drawScissorHand(0, 0, false, openAmt, this.weaponScale, this.scissorActive);
+          ctx.translate(-offset * 2, 0);
+          drawScissorHand(0, 0, true, openAmt, this.weaponScale * 0.92, this.scissorActive);
         }
 
         ctx.restore();
       }
+    }
+
+    function drawScissorHand(x, y, flip, openAmt, scale, powered) {
+      ctx.save();
+      ctx.translate(x, y);
+      if (flip) ctx.scale(-1, 1);
+      ctx.scale(scale, scale);
+
+      const bladeColor = powered ? "#ecf0f1" : "#bdc3c7";
+      const handleColor = powered ? "#922b21" : "#7b241c";
+      const openAngle = openAmt * 0.5;
+
+      ctx.fillStyle = handleColor;
+      ctx.fillRect(-2, 0, 4, 12);
+      ctx.beginPath();
+      ctx.arc(0, 2, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.save();
+      ctx.translate(0, 0);
+      ctx.rotate(-openAngle);
+      ctx.fillStyle = bladeColor;
+      ctx.strokeStyle = "#555";
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-2.5, -13);
+      ctx.lineTo(1.5, -13);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.translate(0, 0);
+      ctx.rotate(openAngle);
+      ctx.fillStyle = bladeColor;
+      ctx.strokeStyle = "#555";
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(2.5, -13);
+      ctx.lineTo(-1.5, -13);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      if (powered) {
+        ctx.strokeStyle = "rgba(231, 76, 60, 0.65)";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(-2, -11);
+        ctx.lineTo(2, -11);
+        ctx.stroke();
+      }
+
+      ctx.restore();
     }
 
     function drawPickaxe(x, y, powered, scale) {
@@ -1117,9 +1377,10 @@
         weaponScale: char.weaponScale,
         weaponOffsetX: char.weaponOffsetX,
         weaponOffsetY: char.weaponOffsetY,
-        ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : "normal",
+        ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : char.abilityType === "scissorhands" ? "scissorhands" : "normal",
         abilityCooldown: char.abilityCooldown || ABILITY.ironMiningInterval,
         baseDamage: char.baseDamage,
+        abilityDamage: char.abilityDamage,
         meleeDamage: char.meleeDamage,
         rangedDamage: char.rangedDamage,
         projectileCooldown: char.projectileCooldown
@@ -1214,6 +1475,8 @@
         frozen.collisionCooldown = PHYSICS.hitCooldownMs;
         mover.collisionCooldown = PHYSICS.hitCooldownMs;
 
+        handleScissorSkillHit(mover, frozen);
+
         checkBattleEnd();
       }
 
@@ -1296,6 +1559,9 @@
           a.collisionCooldown = PHYSICS.hitCooldownMs;
           b.collisionCooldown = PHYSICS.hitCooldownMs;
 
+          handleScissorSkillHit(a, b);
+          handleScissorSkillHit(b, a);
+
           checkBattleEnd();
       }
     }
@@ -1307,6 +1573,7 @@
       lightningBolts = [];
       electricEffects = [];
       arrows = [];
+      chompEffects = [];
       gameOver = false;
       winner = null;
       winningBall = null;
@@ -1424,6 +1691,14 @@
         ctx.lineWidth = 5;
         ctx.strokeText("IRON MINING!", x + barW / 2, barY + barH + 72);
         ctx.fillText("IRON MINING!", x + barW / 2, barY + barH + 72);
+      } else if (ball.scissorActive) {
+        ctx.textAlign = "center";
+        ctx.font = "bold 30px Courier New, monospace";
+        ctx.fillStyle = "#e74c3c";
+        ctx.strokeStyle = COLORS.black;
+        ctx.lineWidth = 5;
+        ctx.strokeText("SCISSOR FRENZY!", x + barW / 2, barY + barH + 72);
+        ctx.fillText("SCISSOR FRENZY!", x + barW / 2, barY + barH + 72);
       }
     }
 
@@ -1501,6 +1776,43 @@
       }
     }
 
+    function drawChompEffects(dt) {
+      for (let i = chompEffects.length - 1; i >= 0; i--) {
+        const c = chompEffects[i];
+        c.life -= dt * 1000;
+        c.phase += dt * 18;
+        c.alpha = clamp(c.life / 320, 0, 1);
+        const snap = (Math.sin(c.phase * 2) + 1) / 2;
+        const spread = 10 + snap * 8;
+
+        ctx.save();
+        ctx.globalAlpha = c.alpha;
+        ctx.translate(c.x, c.y);
+        ctx.strokeStyle = "#c0392b";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-spread, -6);
+        ctx.lineTo(0, 0);
+        ctx.lineTo(-spread, 6);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(spread, -6);
+        ctx.lineTo(0, 0);
+        ctx.lineTo(spread, 6);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(231, 76, 60, 0.45)";
+        ctx.beginPath();
+        ctx.moveTo(-spread * 0.6, -4);
+        ctx.lineTo(0, 2);
+        ctx.lineTo(spread * 0.6, -4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        if (c.life <= 0) chompEffects.splice(i, 1);
+      }
+    }
+
     function drawWinScreen() {
       if (!gameOver) return;
 
@@ -1568,6 +1880,7 @@
         resolveBallCollision(greenBall, blueBall);
         updateLightning(dt);
         updateArrows(dt);
+        updateBleed(dt);
       }
 
       const shake = getShakeOffset();
@@ -1585,6 +1898,7 @@
       drawLightningBolts();
       drawArrows();
       drawElectricEffects(dt);
+      drawChompEffects(dt);
       drawImpactFlashes(dt);
       drawDamageNumbers(dt);
       drawTextEffects(dt);
