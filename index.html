@@ -207,8 +207,10 @@
       screenShake.duration = Math.max(screenShake.duration, duration);
     }
 
-    function getDisplayedDamage(ball) {
-      return Math.round(ball.baseDamage * ball.damageMultiplier);
+    function computeAttackDamage(attacker, defender) {
+      const relSpeed = Math.hypot(attacker.vx - defender.vx, attacker.vy - defender.vy);
+      const speedBonus = clamp(relSpeed * 0.008, 0, 4);
+      return attacker.baseDamage * attacker.damageMultiplier + speedBonus;
     }
 
     function spawnDamageNumber(victim, attacker, amount) {
@@ -738,11 +740,8 @@
       const midY = (a.y + b.y) / 2;
 
       if (a.collisionCooldown <= 0 && b.collisionCooldown <= 0) {
-          const relSpeed = Math.hypot(a.vx - b.vx, a.vy - b.vy);
-          const speedBonus = clamp(relSpeed * 0.008, 0, 4);
-
-          const damageToB = a.baseDamage * a.damageMultiplier + speedBonus;
-          const damageToA = b.baseDamage * b.damageMultiplier + speedBonus;
+          const damageToB = computeAttackDamage(a, b);
+          const damageToA = computeAttackDamage(b, a);
 
           b.hp -= damageToB;
           a.hp -= damageToA;
@@ -830,11 +829,11 @@
       const leftX = 80;
       const rightX = W - 80 - barW;
 
-      drawSingleHp(greenBall, leftX, barY, barW, barH, true);
-      drawSingleHp(blueBall, rightX, barY, barW, barH, false);
+      drawSingleHp(greenBall, leftX, barY, barW, barH, true, blueBall);
+      drawSingleHp(blueBall, rightX, barY, barW, barH, false, greenBall);
     }
 
-    function drawSingleHp(ball, x, barY, barW, barH, isLeft) {
+    function drawSingleHp(ball, x, barY, barW, barH, isLeft, opponent) {
       const hp = Math.max(0, Math.ceil(ball.hp));
       const ratio = clamp(ball.hp / ball.maxHp, 0, 1);
       const color = ball.color;
@@ -875,7 +874,7 @@
       ctx.strokeStyle = COLORS.black;
       ctx.lineWidth = 3;
       const dmgX = isLeft ? x : x + barW;
-      const dmgLabel = "DMG: " + getDisplayedDamage(ball);
+      const dmgLabel = "DMG: " + Math.round(computeAttackDamage(ball, opponent));
       ctx.strokeText(dmgLabel, dmgX, barY + barH + 34);
       ctx.fillText(dmgLabel, dmgX, barY + barH + 34);
 
