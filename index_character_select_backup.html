@@ -40,91 +40,12 @@
     #restartBtn {
       display: none !important;
     }
-
-    #selectScreen {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: #000;
-      z-index: 20;
-      gap: 28px;
-      padding: 40px;
-    }
-
-    #selectScreen h1 {
-      color: #fff;
-      font-size: 56px;
-      letter-spacing: 2px;
-    }
-
-    .select-row {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      width: min(520px, 90%);
-    }
-
-    .select-row label {
-      color: #ccc;
-      font-size: 28px;
-      font-weight: bold;
-    }
-
-    .select-row select {
-      font-size: 28px;
-      padding: 14px 16px;
-      border: 3px solid #fff;
-      background: #111;
-      color: #fff;
-    }
-
-    #startBattleBtn,
-    #backToSelectBtn {
-      font-size: 32px;
-      font-weight: bold;
-      padding: 18px 48px;
-      border: 3px solid #fff;
-      background: #222;
-      color: #fff;
-      cursor: pointer;
-      letter-spacing: 1px;
-    }
-
-    #startBattleBtn:hover,
-    #backToSelectBtn:hover {
-      background: #444;
-    }
-
-    #backToSelectBtn {
-      position: absolute;
-      bottom: 120px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 15;
-      display: none;
-    }
   </style>
 </head>
 <body>
   <div id="wrapper">
     <canvas id="canvas" width="1080" height="1920"></canvas>
     <button id="restartBtn" type="button">RESTART</button>
-    <div id="selectScreen">
-      <h1>CHARACTER SELECT</h1>
-      <div class="select-row">
-        <label for="p1Select">Player 1</label>
-        <select id="p1Select"></select>
-      </div>
-      <div class="select-row">
-        <label for="p2Select">Player 2</label>
-        <select id="p2Select"></select>
-      </div>
-      <button id="startBattleBtn" type="button">START BATTLE</button>
-    </div>
-    <button id="backToSelectBtn" type="button">SELECT CHARACTERS</button>
   </div>
 
   <script>
@@ -176,47 +97,36 @@
     const CHARACTERS = [
       {
         id: "green",
-        name: "Green Hammer",
-        teamColor: "#2ecc40",
+        name: "GREEN",
+        color: "#2ecc40",
         hp: 41,
-        baseDamage: 5.2,
+        damage: 5.2,
         abilityName: "IRON MINING",
         abilityCooldown: 5000,
-        abilityType: "ironMining",
-        ballColor: "#2ecc40",
-        weaponType: "pickaxe",
-        weaponColor: "#6b4f1d",
-        weaponImage: "pickaxe",
         ballImage: null,
+        weaponImage: "pickaxe",
         weaponScale: 2.2,
         weaponOffsetX: 6,
-        weaponOffsetY: 0,
-        radius: 58
+        weaponOffsetY: 0
       },
       {
         id: "blue",
-        name: "Blue Stick",
-        teamColor: "#0074d9",
+        name: "BLUE",
+        color: "#0074d9",
         hp: 95,
-        baseDamage: 3.8,
+        damage: 3.8,
         abilityName: "NORMAL",
         abilityCooldown: 0,
-        abilityType: "normal",
-        ballColor: "#0074d9",
-        weaponType: "stick",
-        weaponColor: "#5c3a1e",
-        weaponImage: "stick",
         ballImage: null,
+        weaponImage: "stick",
         weaponScale: 2.4,
         weaponOffsetX: 6,
-        weaponOffsetY: 0,
-        radius: 72
+        weaponOffsetY: 0
       }
     ];
     // ===== END CHARACTERS =====
 
-    const STORAGE_P1 = "ballBattle_p1";
-    const STORAGE_P2 = "ballBattle_p2";
+    const RADIUS_BY_ID = { green: 58, blue: 72 };
 
     let damageNumbers = [];
     let textEffects = [];
@@ -225,10 +135,6 @@
     let electricEffects = [];
     let gameOver = false;
     let winner = null;
-    let winningBall = null;
-    let gamePhase = "select";
-    let selectedP1Id = "green";
-    let selectedP2Id = "blue";
     let lastTime = 0;
     let greenBall;
     let blueBall;
@@ -237,70 +143,6 @@
     let fighterB;
 
     const screenShake = { intensity: 0, duration: 0 };
-    const selectScreen = document.getElementById("selectScreen");
-    const p1Select = document.getElementById("p1Select");
-    const p2Select = document.getElementById("p2Select");
-    const startBattleBtn = document.getElementById("startBattleBtn");
-    const backToSelectBtn = document.getElementById("backToSelectBtn");
-
-    function getCharacterById(id) {
-      return CHARACTERS.find((c) => c.id === id) || CHARACTERS[0];
-    }
-
-    function populateCharacterSelects() {
-      p1Select.innerHTML = "";
-      p2Select.innerHTML = "";
-      for (const char of CHARACTERS) {
-        const opt1 = document.createElement("option");
-        opt1.value = char.id;
-        opt1.textContent = char.name;
-        p1Select.appendChild(opt1);
-
-        const opt2 = document.createElement("option");
-        opt2.value = char.id;
-        opt2.textContent = char.name;
-        p2Select.appendChild(opt2);
-      }
-    }
-
-    function loadStoredSelections() {
-      selectedP1Id = localStorage.getItem(STORAGE_P1) || CHARACTERS[0].id;
-      selectedP2Id = localStorage.getItem(STORAGE_P2) || CHARACTERS[1].id;
-      if (!getCharacterById(selectedP1Id)) selectedP1Id = CHARACTERS[0].id;
-      if (!getCharacterById(selectedP2Id)) selectedP2Id = CHARACTERS[1].id;
-      p1Select.value = selectedP1Id;
-      p2Select.value = selectedP2Id;
-    }
-
-    function saveStoredSelections() {
-      localStorage.setItem(STORAGE_P1, selectedP1Id);
-      localStorage.setItem(STORAGE_P2, selectedP2Id);
-    }
-
-    function showCharacterSelect() {
-      gamePhase = "select";
-      gameOver = false;
-      winner = null;
-      winningBall = null;
-      selectScreen.style.display = "flex";
-      backToSelectBtn.style.display = "none";
-    }
-
-    function startBattle() {
-      selectedP1Id = p1Select.value;
-      selectedP2Id = p2Select.value;
-      saveStoredSelections();
-      fighterA = getCharacterById(selectedP1Id);
-      fighterB = getCharacterById(selectedP2Id);
-      gamePhase = "battle";
-      selectScreen.style.display = "none";
-      backToSelectBtn.style.display = "none";
-      initGame();
-    }
-
-    function pickBattleCharacters() {
-      return [getCharacterById(selectedP1Id), getCharacterById(selectedP2Id)];
-    }
 
     function clamp(v, min, max) {
       return Math.max(min, Math.min(max, v));
@@ -323,6 +165,10 @@
       const g = Math.floor(((n >> 8) & 255) * factor);
       const b = Math.floor((n & 255) * factor);
       return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    }
+
+    function pickBattleCharacters() {
+      return [CHARACTERS[0], CHARACTERS[1]];
     }
 
     function getMass(ball) {
@@ -458,9 +304,7 @@
 
           if (!gameOver && target.hp <= 0) {
             gameOver = true;
-            winningBall = bolt.fromBall;
-            winner = winningBall.id;
-            backToSelectBtn.style.display = "block";
+            winner = bolt.fromBall.id;
           }
           continue;
         }
@@ -653,8 +497,7 @@
             this.abilityTimer = ABILITY.ironMiningInterval;
             this.awakenedEyeTimeLeft = 800;
             spawnTextEffect(this.x, this.y - this.radius - 40, "IRON MINING!", COLORS.ironMining, 42);
-            const opponent = balls.find((b) => b !== this);
-            if (opponent) spawnLightning(this, opponent);
+            if (blueBall) spawnLightning(this, blueBall);
           }
         }
       }
@@ -679,7 +522,7 @@
         const lookX = clamp(this.vx / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
         const lookY = clamp(this.vy / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
 
-        const awakened = this.ability === "ironMining" && this.awakenedEyeTimeLeft > 0;
+        const awakened = this.id === "green" && this.awakenedEyeTimeLeft > 0;
         const eyeColor = awakened ? "#fff200" : "#fff";
         const pupilColor = awakened ? "#332200" : "#111";
 
@@ -787,21 +630,21 @@
       return new Ball({
         id: char.id,
         displayName: char.name,
-        color: char.ballColor,
-        colorDark: darkenColor(char.ballColor, 0.62),
+        color: char.color,
+        colorDark: darkenColor(char.color, 0.62),
         x,
         y,
         vx,
         vy,
-        radius: char.radius || 60,
+        radius: RADIUS_BY_ID[char.id] || 60,
         hp: char.hp,
-        weapon: char.weaponImage || char.weaponType,
+        weapon: char.weaponImage,
         weaponScale: char.weaponScale,
         weaponOffsetX: char.weaponOffsetX,
         weaponOffsetY: char.weaponOffsetY,
-        ability: char.abilityType === "ironMining" ? "ironMining" : "normal",
+        ability: char.abilityName === "IRON MINING" ? "ironMining" : "normal",
         abilityCooldown: char.abilityCooldown || ABILITY.ironMiningInterval,
-        baseDamage: char.baseDamage
+        baseDamage: char.damage
       });
     }
 
@@ -914,14 +757,12 @@
           if (a.hp <= 0 || b.hp <= 0) {
             gameOver = true;
             if (a.hp <= 0 && b.hp <= 0) {
-              winningBall = a.maxHp <= b.maxHp ? a : b;
+              winner = a.maxHp <= b.maxHp ? "green" : "blue";
             } else if (a.hp <= 0) {
-              winningBall = b;
+              winner = a.name === "green" ? "blue" : "green";
             } else {
-              winningBall = a;
+              winner = b.name === "green" ? "blue" : "green";
             }
-            winner = winningBall.id;
-            backToSelectBtn.style.display = "block";
           }
       }
     }
@@ -934,10 +775,8 @@
       electricEffects = [];
       gameOver = false;
       winner = null;
-      winningBall = null;
       screenShake.intensity = 0;
       screenShake.duration = 0;
-      backToSelectBtn.style.display = "none";
       createBalls();
     }
 
@@ -1125,12 +964,12 @@
     }
 
     function drawWinScreen() {
-      if (!gameOver || !winningBall) return;
+      if (!gameOver || !winner) return;
 
       ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
       ctx.fillRect(0, 0, W, H);
 
-      const winBall = winningBall;
+      const winBall = winner === greenBall.id ? greenBall : blueBall;
       const winText = winBall.displayName + " WINS";
       const winColor = winBall.color;
 
@@ -1165,12 +1004,6 @@
 
     function update(dt) {
       updateScreenShake(dt);
-
-      if (gamePhase !== "battle") {
-        ctx.fillStyle = COLORS.black;
-        ctx.fillRect(0, 0, W, H);
-        return;
-      }
 
       if (!gameOver) {
         for (const ball of balls) {
@@ -1214,16 +1047,11 @@
 
     document.addEventListener("keydown", (e) => {
       if (e.key === "r" || e.key === "R") {
-        if (gamePhase === "battle") initGame();
+        initGame();
       }
     });
 
-    startBattleBtn.addEventListener("click", startBattle);
-    backToSelectBtn.addEventListener("click", showCharacterSelect);
-
-    populateCharacterSelects();
-    loadStoredSelections();
-    showCharacterSelect();
+    initGame();
     requestAnimationFrame(loop);
   </script>
 </body>
