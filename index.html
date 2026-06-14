@@ -423,7 +423,7 @@
 
     function formatPlayerName(ball, isP1) {
       if (isMirrorMatch()) {
-        return (isP1 ? "P1 " : "P2 ") + ball.displayName;
+        return (isP1 ? "1P " : "2P ") + ball.displayName;
       }
       return ball.displayName;
     }
@@ -1522,8 +1522,9 @@
       if (!winningBall) return;
 
       const winBall = winningBall;
-      const playerPrefix = winningBall === greenBall ? "P1 " : "P2 ";
-      const winText = playerPrefix + winBall.displayName + " WINS";
+      const winText = isMirrorMatch()
+        ? (winningBall === greenBall ? "1P " : "2P ") + winBall.displayName + " WINS"
+        : winBall.displayName + " WINS";
       const winColor = winBall.color;
 
       ctx.strokeText(winText, W / 2, H / 2);
