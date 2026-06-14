@@ -768,21 +768,29 @@
     }
 
     function spawnHolyShockwave(x, y) {
-      holyShockwaves.push({ x, y, life: 420, alpha: 1, radius: 18 });
+      holyShockwaves.push({ x, y, life: 520, alpha: 1, radius: 32 });
+      holyShockwaves.push({ x, y, life: 380, alpha: 0.85, radius: 18 });
     }
 
     function spawnExcaliburDrop(fromBall, toBall) {
       excaliburDrops.push({
         fromBall,
         targetBall: toBall,
-        x: clamp(toBall.x, ARENA.x + 36, ARENA.x + ARENA.w - 36),
-        y: ARENA.y - 90,
+        x: clamp(toBall.x, ARENA.x + 40, ARENA.x + ARENA.w - 40),
+        y: ARENA.y - 120,
         telegraphMs: ABILITY.paladinTelegraphMs,
         fallSpeed: ABILITY.paladinFallSpeed,
         damage: ABILITY.paladinDropDamage,
         active: true,
         hit: false
       });
+    }
+
+    function syncExcaliburDropX(drop) {
+      const target = drop.targetBall;
+      if (target && target.hp > 0) {
+        drop.x = clamp(target.x, ARENA.x + 40, ARENA.x + ARENA.w - 40);
+      }
     }
 
     function updateExcaliburDrops(dt) {
@@ -794,34 +802,34 @@
           continue;
         }
 
+        syncExcaliburDropX(drop);
+
         if (drop.telegraphMs > 0) {
           drop.telegraphMs -= dt * 1000;
           continue;
         }
 
         drop.y += drop.fallSpeed * dt;
+        syncExcaliburDropX(drop);
 
         const target = drop.targetBall;
         if (!drop.hit && target && target.hp > 0) {
-          const dx = target.x - drop.x;
-          const hitX = Math.abs(dx) <= target.radius + 26;
-          const hitY = drop.y >= target.y - target.radius * 0.35 && drop.y <= target.y + target.radius + 36;
-          if (hitX && hitY) {
+          if (drop.y >= target.y - target.radius * 0.15) {
             drop.hit = true;
             drop.active = false;
+            drop.y = target.y;
             applyDamage(target, drop.fromBall, drop.damage);
-            const nx = dx === 0 ? 0 : dx / Math.abs(dx);
-            target.vx += nx * ABILITY.paladinKnockback * 0.55;
+            target.vx += rand(-0.4, 0.4) * ABILITY.paladinKnockback * 0.4;
             target.vy += ABILITY.paladinKnockback * 0.85;
             enforceSpeedLimits(target);
             spawnHolyShockwave(target.x, target.y);
-            spawnImpactFlash(target.x, target.y, 76);
-            spawnImpactFlash(target.x, target.y, 42);
-            triggerScreenShake(18, 260);
+            spawnImpactFlash(target.x, target.y, 96);
+            spawnImpactFlash(target.x, target.y, 58);
+            triggerScreenShake(20, 280);
           }
         }
 
-        if (drop.y > ARENA.y + ARENA.h + 100) {
+        if (drop.y > ARENA.y + ARENA.h + 120) {
           drop.active = false;
         }
       }
@@ -830,37 +838,77 @@
     function drawExcaliburBlade(x, y, scale, pointingDown) {
       ctx.save();
       ctx.translate(x, y);
-      ctx.rotate(pointingDown ? Math.PI / 2 : 0);
       ctx.scale(scale, scale);
 
-      ctx.fillStyle = "#ffd700";
-      ctx.strokeStyle = "#b8860b";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(0, -18);
-      ctx.lineTo(-3.5, 2);
-      ctx.lineTo(-1.5, 2);
-      ctx.lineTo(-1.5, 8);
-      ctx.lineTo(1.5, 8);
-      ctx.lineTo(1.5, 2);
-      ctx.lineTo(3.5, 2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+      if (pointingDown) {
+        ctx.fillStyle = "#ffe566";
+        ctx.strokeStyle = "#c9a227";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(0, 26);
+        ctx.lineTo(-5, 6);
+        ctx.lineTo(-2, 6);
+        ctx.lineTo(-2, -4);
+        ctx.lineTo(2, -4);
+        ctx.lineTo(2, 6);
+        ctx.lineTo(5, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
 
-      ctx.fillStyle = "#3498db";
-      ctx.fillRect(-5, 2, 10, 2);
-      ctx.fillStyle = "#d4af37";
-      ctx.fillRect(-1.5, 8, 3, 5);
-      ctx.beginPath();
-      ctx.arc(0, 14, 2.5, 0, Math.PI * 2);
-      ctx.fill();
+        ctx.fillStyle = "#3498db";
+        ctx.fillRect(-7, -4, 14, 3);
+        ctx.fillStyle = "#d4af37";
+        ctx.fillRect(-2, -12, 4, 8);
+        ctx.beginPath();
+        ctx.arc(0, -15, 3, 0, Math.PI * 2);
+        ctx.fill();
 
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.65)";
-      ctx.lineWidth = 1;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.75)";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(0, 22);
+        ctx.lineTo(0, 0);
+        ctx.stroke();
+      } else {
+        ctx.rotate(-0.35);
+        ctx.fillStyle = "#ffd700";
+        ctx.strokeStyle = "#b8860b";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(14, 0);
+        ctx.lineTo(-3, -3);
+        ctx.lineTo(-3, -1);
+        ctx.lineTo(-8, -1);
+        ctx.lineTo(-8, 1);
+        ctx.lineTo(-3, 1);
+        ctx.lineTo(-3, 3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#3498db";
+        ctx.fillRect(-10, -2, 4, 4);
+        ctx.fillStyle = "#d4af37";
+        ctx.fillRect(-14, -1.5, 4, 3);
+      }
+
+      ctx.restore();
+    }
+
+    function drawHolyPillar(x, topY, bottomY, alpha) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const grad = ctx.createLinearGradient(x, topY, x, bottomY);
+      grad.addColorStop(0, "rgba(255, 255, 220, 0.05)");
+      grad.addColorStop(0.45, "rgba(255, 215, 0, 0.45)");
+      grad.addColorStop(1, "rgba(255, 255, 255, 0.15)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(x - 18, topY, 36, bottomY - topY);
+      ctx.strokeStyle = "rgba(255, 249, 196, 0.55)";
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(0, -16);
-      ctx.lineTo(0, 0);
+      ctx.moveTo(x, topY);
+      ctx.lineTo(x, bottomY);
       ctx.stroke();
       ctx.restore();
     }
@@ -869,26 +917,34 @@
       for (const drop of excaliburDrops) {
         if (!drop.active) continue;
 
-        if (drop.telegraphMs > 0 && drop.targetBall) {
-          const pulse = 0.45 + Math.sin(Date.now() * 0.02) * 0.25;
+        const target = drop.targetBall;
+        const landY = target ? target.y : drop.y + 80;
+        const pillarBottom = drop.telegraphMs > 0 ? landY : drop.y + 20;
+        const glowPulse = 0.65 + Math.sin(Date.now() * 0.018) * 0.2;
+
+        drawHolyPillar(drop.x, ARENA.y, pillarBottom, drop.telegraphMs > 0 ? 0.45 : 0.32);
+
+        if (drop.telegraphMs > 0 && target) {
+          const pulse = 0.45 + Math.sin(Date.now() * 0.022) * 0.28;
           ctx.save();
           ctx.globalAlpha = pulse;
           ctx.strokeStyle = "#ffd700";
-          ctx.lineWidth = 2;
-          ctx.setLineDash([6, 5]);
+          ctx.lineWidth = 3;
+          ctx.setLineDash([8, 6]);
           ctx.beginPath();
-          ctx.moveTo(drop.x, drop.targetBall.y - drop.targetBall.radius - 28);
-          ctx.lineTo(drop.x, drop.targetBall.y + drop.targetBall.radius + 10);
+          ctx.arc(drop.x, target.y, target.radius + 18, 0, Math.PI * 2);
           ctx.stroke();
           ctx.setLineDash([]);
-          ctx.beginPath();
-          ctx.arc(drop.x, drop.targetBall.y, drop.targetBall.radius + 14, 0, Math.PI * 2);
-          ctx.stroke();
           ctx.restore();
-          drawExcaliburBlade(drop.x, ARENA.y - 50, 2.4, true);
-        } else {
-          drawExcaliburBlade(drop.x, drop.y, 2.6, true);
         }
+
+        ctx.save();
+        ctx.shadowColor = "#ffd700";
+        ctx.shadowBlur = 24 * glowPulse;
+        const swordScale = drop.telegraphMs > 0 ? 3.6 : 4.4;
+        drawExcaliburBlade(drop.x, drop.y, swordScale, true);
+        ctx.shadowBlur = 0;
+        ctx.restore();
       }
     }
 
@@ -896,19 +952,24 @@
       for (let i = holyShockwaves.length - 1; i >= 0; i--) {
         const s = holyShockwaves[i];
         s.life -= dt * 1000;
-        s.radius += dt * 220;
-        s.alpha = clamp(s.life / 420, 0, 1);
+        s.radius += dt * 280;
+        s.alpha = clamp(s.life / 520, 0, 1);
         ctx.save();
-        ctx.globalAlpha = s.alpha * 0.75;
+        ctx.globalAlpha = s.alpha * 0.8;
         ctx.strokeStyle = "#fff9c4";
-        ctx.lineWidth = 4;
+        ctx.lineWidth = 5;
         ctx.beginPath();
         ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.globalAlpha = s.alpha * 0.35;
+        ctx.globalAlpha = s.alpha * 0.4;
         ctx.fillStyle = "#ffd700";
         ctx.beginPath();
-        ctx.arc(s.x, s.y, s.radius * 0.55, 0, Math.PI * 2);
+        ctx.arc(s.x, s.y, s.radius * 0.62, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = s.alpha * 0.25;
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.radius * 0.28, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
         if (s.life <= 0) holyShockwaves.splice(i, 1);
@@ -1421,28 +1482,64 @@
       drawPaladinHelmet() {
         if (this.ability !== "paladin") return;
 
+        const r = this.radius;
         ctx.save();
-        ctx.fillStyle = "#95a5a6";
-        ctx.strokeStyle = "#566573";
+
+        ctx.fillStyle = "#bdc3c7";
+        ctx.strokeStyle = "#7f8c8d";
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(this.x, this.y - this.radius * 0.18, this.radius * 0.62, Math.PI * 1.05, Math.PI * 1.95);
+        ctx.arc(this.x, this.y - r * 0.22, r * 0.58, Math.PI * 1.08, Math.PI * 1.92);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
 
-        ctx.fillStyle = "#bdc3c7";
-        ctx.fillRect(this.x - this.radius * 0.55, this.y - this.radius * 0.08, this.radius * 1.1, this.radius * 0.14);
-        ctx.strokeStyle = "#7f8c8d";
-        ctx.strokeRect(this.x - this.radius * 0.55, this.y - this.radius * 0.08, this.radius * 1.1, this.radius * 0.14);
-
-        ctx.fillStyle = "#ffd700";
+        ctx.strokeStyle = "#ffd700";
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(this.x, this.y - this.radius * 0.72);
-        ctx.lineTo(this.x - 5, this.y - this.radius * 0.48);
-        ctx.lineTo(this.x + 5, this.y - this.radius * 0.48);
+        ctx.arc(this.x, this.y - r * 0.22, r * 0.58, Math.PI * 1.15, Math.PI * 1.85);
+        ctx.stroke();
+
+        ctx.fillStyle = "#2980b9";
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y - r * 0.82);
+        ctx.quadraticCurveTo(this.x - r * 0.22, this.y - r * 1.05, this.x - r * 0.08, this.y - r * 0.62);
+        ctx.quadraticCurveTo(this.x + r * 0.05, this.y - r * 0.78, this.x, this.y - r * 0.82);
+        ctx.fill();
+        ctx.strokeStyle = "#1a5276";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = "#aab7b8";
+        ctx.fillRect(this.x - r * 0.52, this.y - r * 0.06, r * 1.04, r * 0.12);
+        ctx.strokeStyle = "#ffd700";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(this.x - r * 0.52, this.y - r * 0.06, r * 1.04, r * 0.12);
+
+        ctx.fillStyle = "#95a5a6";
+        ctx.beginPath();
+        ctx.ellipse(this.x - r * 0.62, this.y + r * 0.05, r * 0.18, r * 0.12, -0.3, 0, Math.PI * 2);
+        ctx.ellipse(this.x + r * 0.62, this.y + r * 0.05, r * 0.18, r * 0.12, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#ffd700";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = "rgba(189, 195, 199, 0.85)";
+        ctx.beginPath();
+        ctx.moveTo(this.x - r * 0.28, this.y + r * 0.18);
+        ctx.lineTo(this.x + r * 0.28, this.y + r * 0.18);
+        ctx.lineTo(this.x + r * 0.22, this.y + r * 0.42);
+        ctx.lineTo(this.x - r * 0.22, this.y + r * 0.42);
         ctx.closePath();
         ctx.fill();
+        ctx.strokeStyle = "#ffd700";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = "#5dade2";
+        ctx.fillRect(this.x - r * 0.08, this.y + r * 0.24, r * 0.16, r * 0.14);
+
         ctx.restore();
       }
 
@@ -1524,8 +1621,15 @@
         ctx.fillStyle = this.color;
         ctx.fill();
         ctx.lineWidth = 3;
-        ctx.strokeStyle = "#111";
+        ctx.strokeStyle = this.ability === "paladin" ? "#ffd700" : "#111";
         ctx.stroke();
+        if (this.ability === "paladin") {
+          ctx.strokeStyle = "rgba(189, 195, 199, 0.55)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius - 5, 0, Math.PI * 2);
+          ctx.stroke();
+        }
 
         this.drawFace();
         this.drawPaladinHelmet();
@@ -1577,7 +1681,7 @@
           ctx.translate(-offset * 2, 0);
           drawScissorHand(0, 0, true, openAmt, this.weaponScale * 0.92, this.scissorActive);
         } else if (this.weapon === "excalibur" || this.ability === "paladin") {
-          drawExcaliburBlade(0, 0, this.weaponScale, false);
+          drawExcaliburBlade(0, 0, this.weaponScale * 0.85, false);
         }
 
         ctx.restore();
@@ -2119,7 +2223,19 @@
         ctx.lineTo(s * 0.65, 0);
         ctx.stroke();
       } else if (icon === "paladin") {
-        drawExcaliburBlade(0, 0, s * 0.22, false);
+        ctx.fillStyle = "#ffd700";
+        ctx.beginPath();
+        ctx.moveTo(0, s * 0.5);
+        ctx.lineTo(-s * 0.2, -s * 0.05);
+        ctx.lineTo(-s * 0.08, -s * 0.05);
+        ctx.lineTo(-s * 0.08, -s * 0.35);
+        ctx.lineTo(s * 0.08, -s * 0.35);
+        ctx.lineTo(s * 0.08, -s * 0.05);
+        ctx.lineTo(s * 0.2, -s * 0.05);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#3498db";
+        ctx.fillRect(-s * 0.18, -s * 0.05, s * 0.36, s * 0.08);
       } else {
         ctx.strokeStyle = "#5c3a1e";
         ctx.lineWidth = 3;
@@ -2139,7 +2255,12 @@
       ctx.lineWidth = state.ready ? 3 : 2;
       ctx.fillRect(boxX, boxY, boxSize, boxSize);
       ctx.strokeRect(boxX, boxY, boxSize, boxSize);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(boxX + 2, boxY + 2, boxSize - 4, boxSize - 4);
+      ctx.clip();
       drawSkillIconGlyph(state.icon, boxX + boxSize / 2, boxY + boxSize / 2, boxSize);
+      ctx.restore();
 
       if (!state.ready && state.totalMs > 0) {
         ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
