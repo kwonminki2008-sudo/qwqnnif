@@ -19,7 +19,7 @@
       align-items: center;
       justify-content: center;
       overflow: hidden;
-      font-family: "Courier New", Courier, monospace;
+      font-family: "Segoe UI", Arial, sans-serif;
     }
 
     #wrapper {
@@ -35,8 +35,6 @@
       display: block;
       width: 100%;
       height: 100%;
-      image-rendering: pixelated;
-      image-rendering: crisp-edges;
     }
 
     #restartBtn {
@@ -45,7 +43,7 @@
       left: 50%;
       transform: translateX(-50%);
       padding: 20px 56px;
-      font-family: "Courier New", Courier, monospace;
+      font-family: "Segoe UI", Arial, sans-serif;
       font-size: 32px;
       font-weight: bold;
       color: #fff;
@@ -76,16 +74,17 @@
   <script>
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
     const restartBtn = document.getElementById("restartBtn");
 
     const W = 1080;
     const H = 1920;
 
     const ARENA = {
-      x: 90,
-      y: 280,
-      w: 900,
-      h: 1200
+      x: 146,
+      y: 355,
+      w: 788,
+      h: 1050
     };
 
     const COLORS = {
@@ -321,7 +320,8 @@
           target.hp -= 5;
           spawnLightningDamageNumber(target);
           spawnElectricEffect(target.x, target.y);
-          spawnImpactFlash(target.x, target.y, 36);
+          spawnImpactFlash(target.x, target.y, 52);
+          spawnImpactFlash(target.x, target.y, 28);
           bolt.active = false;
 
           if (!gameOver && target.hp <= 0) {
@@ -354,22 +354,34 @@
         ctx.lineTo(x1 + dx * t + px * jitter, y1 + dy * t + py * jitter);
       }
       ctx.lineTo(x2, y2);
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 5;
+      ctx.strokeStyle = "#1a3a4a";
+      ctx.lineWidth = 7;
+      ctx.lineJoin = "round";
       ctx.stroke();
-      ctx.strokeStyle = COLORS.ironMining;
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = COLORS.green;
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      ctx.strokeStyle = "#00eaff";
+      ctx.lineWidth = 2;
       ctx.stroke();
     }
 
     function drawLightningBolts() {
       for (const bolt of lightningBolts) {
         if (!bolt.active) continue;
+        ctx.save();
+        ctx.shadowColor = COLORS.green;
+        ctx.shadowBlur = 12;
         drawZigzagBolt(bolt.fromBall.x, bolt.fromBall.y, bolt.x, bolt.y);
+        ctx.shadowBlur = 0;
         ctx.beginPath();
-        ctx.arc(bolt.x, bolt.y, 6, 0, Math.PI * 2);
-        ctx.fillStyle = "#fff";
+        ctx.arc(bolt.x, bolt.y, 7, 0, Math.PI * 2);
+        ctx.fillStyle = "#00eaff";
         ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#1a3a4a";
+        ctx.stroke();
+        ctx.restore();
       }
     }
 
@@ -381,8 +393,8 @@
 
         ctx.save();
         ctx.globalAlpha = e.alpha;
-        ctx.strokeStyle = COLORS.ironMining;
-        ctx.lineWidth = 4;
+        ctx.strokeStyle = "#00eaff";
+        ctx.lineWidth = 3;
         for (let j = 0; j < 3; j++) {
           const angle = (j / 3) * Math.PI * 2 + e.life * 0.02;
           const r = 18 + (420 - e.life) * 0.04;
@@ -393,8 +405,11 @@
         }
         ctx.beginPath();
         ctx.arc(e.x, e.y, 14, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255, 230, 80, 0.5)";
+        ctx.fillStyle = "rgba(0, 234, 255, 0.45)";
         ctx.fill();
+        ctx.strokeStyle = COLORS.green;
+        ctx.lineWidth = 2;
+        ctx.stroke();
         ctx.restore();
 
         if (e.life <= 0) electricEffects.splice(i, 1);
@@ -428,6 +443,7 @@
         this.abilityTimer = config.ability === "ironMining" ? config.abilityCooldown : 0;
         this.ironMiningActive = false;
         this.ironMiningTimeLeft = 0;
+        this.awakenedEyeTimeLeft = 0;
       }
 
       get damageMultiplier() {
@@ -483,6 +499,10 @@
         this.weaponAngle = lerpAngle(this.weaponAngle, targetAngle, smoothFactor);
         this.glowPhase += dt * 4;
 
+        if (this.awakenedEyeTimeLeft > 0) {
+          this.awakenedEyeTimeLeft -= dt * 1000;
+        }
+
         if (this.collisionCooldown > 0) {
           this.collisionCooldown -= dt * 1000;
         }
@@ -501,6 +521,7 @@
             this.ironMiningActive = true;
             this.ironMiningTimeLeft = ABILITY.ironMiningDuration;
             this.abilityTimer = ABILITY.ironMiningInterval;
+            this.awakenedEyeTimeLeft = 800;
             spawnTextEffect(this.x, this.y - this.radius - 40, "IRON MINING!", COLORS.ironMining, 42);
             if (blueBall) spawnLightning(this, blueBall);
           }
@@ -526,7 +547,9 @@
         const lookX = clamp(this.vx / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
         const lookY = clamp(this.vy / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
 
-        ctx.fillStyle = "#fff";
+        const eyeColor = this.id === "green" && this.awakenedEyeTimeLeft > 0 ? COLORS.ironMining : "#fff";
+
+        ctx.fillStyle = eyeColor;
         ctx.beginPath();
         ctx.arc(this.x - eyeOffset + lookX, this.y - eyeOffset * 0.5 + lookY, eyeR, 0, Math.PI * 2);
         ctx.arc(this.x + eyeOffset + lookX, this.y - eyeOffset * 0.5 + lookY, eyeR, 0, Math.PI * 2);
@@ -547,7 +570,7 @@
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fillStyle = this.color;
         ctx.fill();
-        ctx.lineWidth = 7;
+        ctx.lineWidth = 3;
         ctx.strokeStyle = "#111";
         ctx.stroke();
 
@@ -895,7 +918,7 @@
         ctx.save();
         ctx.globalAlpha = d.alpha;
         const scale = d.scale || 1;
-        ctx.font = `bold ${Math.round(64 * scale)}px Courier New, monospace`;
+        ctx.font = `bold ${Math.round(64 * scale)}px Segoe UI, Arial, sans-serif`;
         ctx.fillStyle = d.color;
         ctx.strokeStyle = COLORS.black;
         ctx.lineWidth = 8;
@@ -921,7 +944,7 @@
 
         ctx.save();
         ctx.globalAlpha = t.alpha;
-        ctx.font = `bold ${t.size}px Courier New, monospace`;
+        ctx.font = `bold ${t.size}px Segoe UI, Arial, sans-serif`;
         ctx.fillStyle = t.color;
         ctx.strokeStyle = COLORS.black;
         ctx.lineWidth = 5;
