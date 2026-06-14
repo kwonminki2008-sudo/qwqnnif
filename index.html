@@ -41,12 +41,12 @@
 
     #restartBtn {
       position: absolute;
-      bottom: 48px;
+      bottom: 120px;
       left: 50%;
       transform: translateX(-50%);
-      padding: 18px 48px;
+      padding: 20px 56px;
       font-family: "Courier New", Courier, monospace;
-      font-size: 28px;
+      font-size: 32px;
       font-weight: bold;
       color: #fff;
       background: #222;
@@ -54,6 +54,7 @@
       cursor: pointer;
       z-index: 10;
       letter-spacing: 2px;
+      display: none;
     }
 
     #restartBtn:hover {
@@ -69,7 +70,7 @@
 <body>
   <div id="wrapper">
     <canvas id="canvas" width="1080" height="1920"></canvas>
-    <button id="restartBtn" type="button">RESTART (R)</button>
+    <button id="restartBtn" type="button">RESTART</button>
   </div>
 
   <script>
@@ -94,7 +95,6 @@
       blueDark: "#0056a3",
       white: "#ffffff",
       black: "#000000",
-      damage: "#ff4136",
       ironMining: "#ffd700",
       hpGreen: "#2ecc40",
       hpBlue: "#0074d9"
@@ -138,6 +138,13 @@
       return min + Math.random() * (max - min);
     }
 
+    function lerpAngle(from, to, t) {
+      let diff = to - from;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      return from + diff * t;
+    }
+
     function getMass(ball) {
       return ball.radius * ball.radius;
     }
@@ -174,15 +181,26 @@
       screenShake.duration = Math.max(screenShake.duration, duration);
     }
 
-    function spawnDamageNumber(x, y, amount) {
+    function spawnDamageNumber(victim, attacker, amount) {
+      const dx = attacker.x - victim.x;
+      const dy = attacker.y - victim.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const towardAttacker = victim.radius * 0.42;
+      const color = attacker.name === "green" ? COLORS.green : COLORS.blue;
+
       damageNumbers.push({
-        x,
-        y,
-        text: String(Math.round(amount)),
+        x: victim.x + (dx / dist) * towardAttacker,
+        y: victim.y + (dy / dist) * towardAttacker - victim.radius * 0.25,
+        text: "-" + Math.round(amount),
+        color,
         alpha: 1,
-        vy: -3.4,
-        life: 950
+        vy: -180,
+        life: 1300
       });
+    }
+
+    function updateRestartButton() {
+      restartBtn.style.display = gameOver ? "block" : "none";
     }
 
     function spawnTextEffect(x, y, text, color, size = 48) {
@@ -223,8 +241,8 @@
         this.weapon = config.weapon;
         this.ability = config.ability;
         this.baseDamage = config.baseDamage;
-        this.weaponAngle = 0;
-        this.weaponWobble = 0;
+        this.weaponAngle = Math.atan2(config.vy, config.vx);
+        this.glowPhase = 0;
         this.collisionCooldown = 0;
         this.abilityTimer = config.ability === "ironMining" ? ABILITY.ironMiningInterval : 0;
         this.ironMiningActive = false;
@@ -277,10 +295,10 @@
         this.y += this.vy * dt;
         this.bounceOffWalls();
 
-        const speed = Math.hypot(this.vx, this.vy);
         const targetAngle = Math.atan2(this.vy, this.vx);
-        this.weaponAngle += (targetAngle - this.weaponAngle) * 0.14;
-        this.weaponWobble += dt * (8 + speed * 0.4);
+        const smoothFactor = clamp(dt * 5.5, 0, 0.07);
+        this.weaponAngle = lerpAngle(this.weaponAngle, targetAngle, smoothFactor);
+        this.glowPhase += dt * 4;
 
         if (this.collisionCooldown > 0) {
           this.collisionCooldown -= dt * 1000;
@@ -329,8 +347,8 @@
 
         if (this.ironMiningActive) {
           ctx.beginPath();
-          ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.weaponWobble * 2) * 3, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(255, 215, 0, ${0.55 + Math.sin(this.weaponWobble * 3) * 0.25})`;
+          ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.glowPhase * 2) * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255, 215, 0, ${0.55 + Math.sin(this.glowPhase * 3) * 0.25})`;
           ctx.lineWidth = 5;
           ctx.stroke();
         }
@@ -342,8 +360,7 @@
       drawWeapon() {
         ctx.save();
         ctx.translate(this.x, this.y);
-        const wobble = Math.sin(this.weaponWobble) * 0.18;
-        ctx.rotate(this.weaponAngle + wobble);
+        ctx.rotate(this.weaponAngle);
 
         const offset = this.radius + 6;
         ctx.translate(offset, 0);
@@ -516,8 +533,8 @@
           b.hp -= damageToB;
           a.hp -= damageToA;
 
-          spawnDamageNumber(midX - 36, midY - 24, damageToB);
-          spawnDamageNumber(midX + 36, midY - 24, damageToA);
+          spawnDamageNumber(b, a, damageToB);
+          spawnDamageNumber(a, b, damageToA);
           spawnImpactFlash(midX, midY, minDist * 0.55);
           triggerScreenShake(14, 220);
 
@@ -533,6 +550,7 @@
             } else {
               winner = b.name === "green" ? "blue" : "green";
             }
+            updateRestartButton();
           }
       }
     }
@@ -546,6 +564,7 @@
       screenShake.intensity = 0;
       screenShake.duration = 0;
       createBalls();
+      updateRestartButton();
     }
 
     function drawArena() {
@@ -622,15 +641,17 @@
       for (let i = damageNumbers.length - 1; i >= 0; i--) {
         const d = damageNumbers[i];
         d.life -= dt * 1000;
-        d.y += d.vy;
-        d.alpha = clamp(d.life / 950, 0, 1);
+        d.y += d.vy * dt;
+        const fadeStart = 500;
+        d.alpha = d.life > fadeStart ? 1 : clamp(d.life / fadeStart, 0, 1);
 
         ctx.save();
         ctx.globalAlpha = d.alpha;
-        ctx.font = "bold 44px Courier New, monospace";
-        ctx.fillStyle = COLORS.damage;
+        ctx.font = "bold 58px Courier New, monospace";
+        ctx.fillStyle = d.color;
         ctx.strokeStyle = COLORS.black;
-        ctx.lineWidth = 4;
+        ctx.lineWidth = 6;
+        ctx.lineJoin = "round";
         ctx.textAlign = "center";
         ctx.strokeText(d.text, d.x, d.y);
         ctx.fillText(d.text, d.x, d.y);
@@ -696,11 +717,7 @@
       ctx.lineWidth = 10;
       ctx.strokeText(winText, W / 2, H / 2);
       ctx.fillStyle = winColor;
-      ctx.fillText(winText, W / 2, H / 2);
-
-      ctx.font = "28px Courier New, monospace";
-      ctx.fillStyle = COLORS.white;
-      ctx.fillText("Press R or RESTART to play again", W / 2, H / 2 + 70);
+      ctx.fillText(winText, W / 2, H / 2 - 40);
     }
 
     function updateScreenShake(dt) {
@@ -765,12 +782,6 @@
 
     restartBtn.addEventListener("click", () => {
       initGame();
-    });
-
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "r" || e.key === "R") {
-        initGame();
-      }
     });
 
     initGame();
