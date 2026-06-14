@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1080, initial-scale=1.0">
+  <title>Ball Battle — YouTube Shorts</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      font-family: "Courier New", Courier, monospace;
+    }
+
+    #wrapper {
+      position: relative;
+      width: 1080px;
+      height: 1920px;
+      max-width: 100vw;
+      max-height: 100vh;
+      aspect-ratio: 9 / 16;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    #restartBtn {
+      position: absolute;
+      bottom: 120px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 20px 56px;
+      font-family: "Courier New", Courier, monospace;
+      font-size: 32px;
+      font-weight: bold;
+      color: #fff;
+      background: #222;
+      border: 3px solid #fff;
+      cursor: pointer;
+      z-index: 10;
+      letter-spacing: 2px;
+      display: none;
+    }
+
+    #restartBtn:hover {
+      background: #444;
+    }
+
+    #restartBtn:active {
+      background: #666;
+      transform: translateX(-50%) scale(0.97);
+    }
+  </style>
+</head>
+<body>
+  <div id="wrapper">
+    <canvas id="canvas" width="1080" height="1920"></canvas>
+    <button id="restartBtn" type="button">RESTART</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const restartBtn = document.getElementById("restartBtn");
+
+    const W = 1080;
+    const H = 1920;
+
+    const ARENA = {
+      x: 90,
+      y: 280,
+      w: 900,
+      h: 1200
+    };
+
+    const COLORS = {
+      green: "#2ecc40",
+      greenDark: "#1a8f28",
+      blue: "#0074d9",
+      blueDark: "#0056a3",
+      white: "#ffffff",
+      black: "#000000",
+      ironMining: "#ffd700",
+      hpGreen: "#2ecc40",
+      hpBlue: "#0074d9"
+    };
+
+    const PHYSICS = {
+      minSpeed: 340,
+      maxSpeed: 620,
+      wallRestitution: 1.22,
+      ballRestitution: 1.38,
+      knockbackForce: 420,
+      separationPadding: 4,
+      angleJitter: 0.14,
+      wallAngleJitter: 0.08,
+      hitCooldownMs: 580
+    };
+
+    const ABILITY = {
+      ironMiningInterval: 5000,
+      ironMiningDuration: 3000,
+      ironMiningDamageMultiplier: 2.6
+    };
+
+    let damageNumbers = [];
+    let textEffects = [];
+    let impactFlashes = [];
+    let gameOver = false;
+    let winner = null;
+    let lastTime = 0;
+    let greenBall;
+    let blueBall;
+    let balls = [];
+
+    const screenShake = { intensity: 0, duration: 0 };
+
+    function clamp(v, min, max) {
+      return Math.max(min, Math.min(max, v));
+    }
+
+    function rand(min, max) {
+      return min + Math.random() * (max - min);
+    }
+
+    function lerpAngle(from, to, t) {
+      let diff = to - from;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      return from + diff * t;
+    }
+
+    function getMass(ball) {
+      return ball.radius * ball.radius;
+    }
+
+    function enforceSpeedLimits(ball) {
+      let speed = Math.hypot(ball.vx, ball.vy);
+      if (speed < PHYSICS.minSpeed) {
+        if (speed < 1) {
+          const angle = rand(0, Math.PI * 2);
+          ball.vx = Math.cos(angle) * PHYSICS.minSpeed;
+          ball.vy = Math.sin(angle) * PHYSICS.minSpeed;
+        } else {
+          const scale = PHYSICS.minSpeed / speed;
+          ball.vx *= scale;
+          ball.vy *= scale;
+        }
+      } else if (speed > PHYSICS.maxSpeed) {
+        const scale = PHYSICS.maxSpeed / speed;
+        ball.vx *= scale;
+        ball.vy *= scale;
+      }
+    }
+
+    function preserveSpeedWithJitter(ball, preSpeed) {
+      let speed = Math.max(preSpeed, PHYSICS.minSpeed);
+      speed = Math.min(speed, PHYSICS.maxSpeed);
+      let angle = Math.atan2(ball.vy, ball.vx) + rand(-PHYSICS.angleJitter, PHYSICS.angleJitter);
+      ball.vx = Math.cos(angle) * speed;
+      ball.vy = Math.sin(angle) * speed;
+    }
+
+    function triggerScreenShake(intensity, duration) {
+      screenShake.intensity = Math.max(screenShake.intensity, intensity);
+      screenShake.duration = Math.max(screenShake.duration, duration);
+    }
+
+    function spawnDamageNumber(victim, attacker, amount) {
+      const dx = attacker.x - victim.x;
+      const dy = attacker.y - victim.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const towardAttacker = victim.radius * 0.42;
+      const color = attacker.name === "green" ? COLORS.green : COLORS.blue;
+
+      damageNumbers.push({
+        x: victim.x + (dx / dist) * towardAttacker,
+        y: victim.y + (dy / dist) * towardAttacker - victim.radius * 0.25,
+        text: "-" + Math.round(amount),
+        color,
+        alpha: 1,
+        vy: -180,
+        life: 1300
+      });
+    }
+
+    function updateRestartButton() {
+      restartBtn.style.display = gameOver ? "block" : "none";
+    }
+
+    function spawnTextEffect(x, y, text, color, size = 48) {
+      textEffects.push({
+        x,
+        y,
+        text,
+        color,
+        size,
+        alpha: 1,
+        life: 1800,
+        vy: -1.2
+      });
+    }
+
+    function spawnImpactFlash(x, y, radius) {
+      impactFlashes.push({
+        x,
+        y,
+        radius,
+        alpha: 0.85,
+        life: 180
+      });
+    }
+
+    class Ball {
+      constructor(config) {
+        this.name = config.name;
+        this.color = config.color;
+        this.colorDark = config.colorDark;
+        this.x = config.x;
+        this.y = config.y;
+        this.vx = config.vx;
+        this.vy = config.vy;
+        this.radius = config.radius;
+        this.hp = config.hp;
+        this.maxHp = config.hp;
+        this.weapon = config.weapon;
+        this.ability = config.ability;
+        this.baseDamage = config.baseDamage;
+        this.weaponAngle = Math.atan2(config.vy, config.vx);
+        this.glowPhase = 0;
+        this.collisionCooldown = 0;
+        this.abilityTimer = config.ability === "ironMining" ? ABILITY.ironMiningInterval : 0;
+        this.ironMiningActive = false;
+        this.ironMiningTimeLeft = 0;
+      }
+
+      get damageMultiplier() {
+        if (this.ironMiningActive) return ABILITY.ironMiningDamageMultiplier;
+        return 1;
+      }
+
+      bounceOffWalls() {
+        const left = ARENA.x + this.radius;
+        const right = ARENA.x + ARENA.w - this.radius;
+        const top = ARENA.y + this.radius;
+        const bottom = ARENA.y + ARENA.h - this.radius;
+        const e = PHYSICS.wallRestitution;
+
+        if (this.x < left) {
+          this.x = left;
+          this.vx = Math.abs(this.vx) * e;
+          this.vy += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
+          triggerScreenShake(4, 80);
+        } else if (this.x > right) {
+          this.x = right;
+          this.vx = -Math.abs(this.vx) * e;
+          this.vy += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
+          triggerScreenShake(4, 80);
+        }
+
+        if (this.y < top) {
+          this.y = top;
+          this.vy = Math.abs(this.vy) * e;
+          this.vx += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
+          triggerScreenShake(4, 80);
+        } else if (this.y > bottom) {
+          this.y = bottom;
+          this.vy = -Math.abs(this.vy) * e;
+          this.vx += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
+          triggerScreenShake(4, 80);
+        }
+
+        enforceSpeedLimits(this);
+      }
+
+      update(dt) {
+        if (gameOver) return;
+
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.bounceOffWalls();
+
+        const targetAngle = Math.atan2(this.vy, this.vx);
+        const smoothFactor = clamp(dt * 5.5, 0, 0.07);
+        this.weaponAngle = lerpAngle(this.weaponAngle, targetAngle, smoothFactor);
+        this.glowPhase += dt * 4;
+
+        if (this.collisionCooldown > 0) {
+          this.collisionCooldown -= dt * 1000;
+        }
+
+        if (this.ability === "ironMining") {
+          this.abilityTimer -= dt * 1000;
+
+          if (this.ironMiningActive) {
+            this.ironMiningTimeLeft -= dt * 1000;
+            if (this.ironMiningTimeLeft <= 0) {
+              this.ironMiningActive = false;
+            }
+          }
+
+          if (this.abilityTimer <= 0 && !this.ironMiningActive) {
+            this.ironMiningActive = true;
+            this.ironMiningTimeLeft = ABILITY.ironMiningDuration;
+            this.abilityTimer = ABILITY.ironMiningInterval;
+            spawnTextEffect(this.x, this.y - this.radius - 40, "IRON MINING!", COLORS.ironMining, 42);
+          }
+        }
+      }
+
+      draw() {
+        ctx.save();
+
+        const gradient = ctx.createRadialGradient(
+          this.x - this.radius * 0.3,
+          this.y - this.radius * 0.3,
+          this.radius * 0.1,
+          this.x,
+          this.y,
+          this.radius
+        );
+        gradient.addColorStop(0, this.color);
+        gradient.addColorStop(1, this.colorDark);
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(0,0,0,0.35)";
+        ctx.stroke();
+
+        if (this.ironMiningActive) {
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.glowPhase * 2) * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255, 215, 0, ${0.55 + Math.sin(this.glowPhase * 3) * 0.25})`;
+          ctx.lineWidth = 5;
+          ctx.stroke();
+        }
+
+        this.drawWeapon();
+        ctx.restore();
+      }
+
+      drawWeapon() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.weaponAngle);
+
+        const offset = this.radius + 6;
+        ctx.translate(offset, 0);
+
+        if (this.weapon === "pickaxe") {
+          drawPickaxe(0, 0, this.ironMiningActive);
+        } else if (this.weapon === "stick") {
+          drawStick(0, 0);
+        }
+
+        ctx.restore();
+      }
+    }
+
+    function drawPickaxe(x, y, powered) {
+      const scale = 2.2;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+
+      const handleColor = powered ? "#8b6914" : "#6b4f1d";
+      const headColor = powered ? "#e8e8e8" : "#aaaaaa";
+      const edgeColor = powered ? "#ffd700" : "#888888";
+
+      ctx.fillStyle = handleColor;
+      ctx.fillRect(-2, -2, 4, 22);
+
+      ctx.fillStyle = headColor;
+      ctx.fillRect(-10, -6, 20, 6);
+      ctx.fillRect(-4, -10, 8, 4);
+
+      ctx.fillStyle = edgeColor;
+      ctx.fillRect(-11, -7, 3, 8);
+      ctx.fillRect(8, -7, 3, 8);
+
+      if (powered) {
+        ctx.fillStyle = "rgba(255, 215, 0, 0.7)";
+        ctx.fillRect(-10, -6, 20, 2);
+      }
+
+      ctx.restore();
+    }
+
+    function drawStick(x, y) {
+      const scale = 2.4;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-0.4);
+      ctx.scale(scale, scale);
+
+      ctx.fillStyle = "#5c3a1e";
+      ctx.fillRect(-2, -2, 4, 26);
+
+      ctx.fillStyle = "#3d2614";
+      ctx.fillRect(-1, 20, 2, 4);
+
+      ctx.restore();
+    }
+
+    function createBalls() {
+      greenBall = new Ball({
+        name: "green",
+        color: COLORS.green,
+        colorDark: COLORS.greenDark,
+        x: ARENA.x + ARENA.w * 0.35,
+        y: ARENA.y + ARENA.h * 0.4,
+        vx: 380,
+        vy: 300,
+        radius: 58,
+        hp: 41,
+        weapon: "pickaxe",
+        ability: "ironMining",
+        baseDamage: 5.2
+      });
+
+      blueBall = new Ball({
+        name: "blue",
+        color: COLORS.blue,
+        colorDark: COLORS.blueDark,
+        x: ARENA.x + ARENA.w * 0.65,
+        y: ARENA.y + ARENA.h * 0.6,
+        vx: -360,
+        vy: -320,
+        radius: 72,
+        hp: 95,
+        weapon: "stick",
+        ability: "normal",
+        baseDamage: 3.8
+      });
+
+      balls = [greenBall, blueBall];
+    }
+
+    function separateBalls(a, b, nx, ny, overlap) {
+      const massA = getMass(a);
+      const massB = getMass(b);
+      const totalMass = massA + massB;
+      const extra = PHYSICS.separationPadding;
+
+      a.x -= nx * overlap * (massB / totalMass) - nx * extra * 0.5;
+      a.y -= ny * overlap * (massB / totalMass) - ny * extra * 0.5;
+      b.x += nx * overlap * (massA / totalMass) + nx * extra * 0.5;
+      b.y += ny * overlap * (massA / totalMass) + ny * extra * 0.5;
+    }
+
+    function resolveBallCollision(a, b) {
+      let dx = b.x - a.x;
+      let dy = b.y - a.y;
+      let dist = Math.hypot(dx, dy);
+      const minDist = a.radius + b.radius;
+
+      if (dist === 0) {
+        const angle = rand(0, Math.PI * 2);
+        dx = Math.cos(angle);
+        dy = Math.sin(angle);
+        dist = 1;
+      }
+
+      if (dist >= minDist) return;
+
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const overlap = minDist - dist;
+
+      separateBalls(a, b, nx, ny, overlap);
+
+      const massA = getMass(a);
+      const massB = getMass(b);
+      const invMassA = 1 / massA;
+      const invMassB = 1 / massB;
+
+      let velAlongNormal = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+
+      if (velAlongNormal >= 0) {
+        velAlongNormal = -Math.max(PHYSICS.minSpeed * 0.35, 80);
+      }
+
+      const speedA = Math.hypot(a.vx, a.vy);
+      const speedB = Math.hypot(b.vx, b.vy);
+      const e = PHYSICS.ballRestitution;
+
+      const impulseMag = -(1 + e) * velAlongNormal / (invMassA + invMassB);
+
+      a.vx += impulseMag * invMassA * nx;
+      a.vy += impulseMag * invMassA * ny;
+      b.vx -= impulseMag * invMassB * nx;
+      b.vy -= impulseMag * invMassB * ny;
+
+      const knockback = PHYSICS.knockbackForce;
+      a.vx -= nx * knockback;
+      a.vy -= ny * knockback;
+      b.vx += nx * knockback;
+      b.vy += ny * knockback;
+
+      preserveSpeedWithJitter(a, speedA);
+      preserveSpeedWithJitter(b, speedB);
+      enforceSpeedLimits(a);
+      enforceSpeedLimits(b);
+
+      const midX = (a.x + b.x) / 2;
+      const midY = (a.y + b.y) / 2;
+
+      if (a.collisionCooldown <= 0 && b.collisionCooldown <= 0) {
+          const relSpeed = Math.hypot(a.vx - b.vx, a.vy - b.vy);
+          const speedBonus = clamp(relSpeed * 0.008, 0, 4);
+
+          const damageToB = a.baseDamage * a.damageMultiplier + speedBonus;
+          const damageToA = b.baseDamage * b.damageMultiplier + speedBonus;
+
+          b.hp -= damageToB;
+          a.hp -= damageToA;
+
+          spawnDamageNumber(b, a, damageToB);
+          spawnDamageNumber(a, b, damageToA);
+          spawnImpactFlash(midX, midY, minDist * 0.55);
+          triggerScreenShake(14, 220);
+
+          a.collisionCooldown = PHYSICS.hitCooldownMs;
+          b.collisionCooldown = PHYSICS.hitCooldownMs;
+
+          if (a.hp <= 0 || b.hp <= 0) {
+            gameOver = true;
+            if (a.hp <= 0 && b.hp <= 0) {
+              winner = a.maxHp <= b.maxHp ? "green" : "blue";
+            } else if (a.hp <= 0) {
+              winner = a.name === "green" ? "blue" : "green";
+            } else {
+              winner = b.name === "green" ? "blue" : "green";
+            }
+            updateRestartButton();
+          }
+      }
+    }
+
+    function initGame() {
+      damageNumbers = [];
+      textEffects = [];
+      impactFlashes = [];
+      gameOver = false;
+      winner = null;
+      screenShake.intensity = 0;
+      screenShake.duration = 0;
+      createBalls();
+      updateRestartButton();
+    }
+
+    function drawArena() {
+      ctx.fillStyle = COLORS.black;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.fillStyle = COLORS.white;
+      ctx.fillRect(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
+
+      ctx.strokeStyle = "#cccccc";
+      ctx.lineWidth = 6;
+      ctx.strokeRect(ARENA.x, ARENA.y, ARENA.w, ARENA.h);
+    }
+
+    function drawHeader() {
+      ctx.fillStyle = COLORS.white;
+      ctx.font = "bold 52px Courier New, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("BALL BATTLE", W / 2, 120);
+
+      ctx.font = "28px Courier New, monospace";
+      ctx.fillStyle = "#888888";
+      ctx.fillText("YouTube Shorts Simulation", W / 2, 170);
+
+      ctx.font = "24px Courier New, monospace";
+      ctx.textAlign = "left";
+      ctx.fillStyle = COLORS.green;
+      ctx.fillText("GREEN — Pickaxe | IRON MINING (5s)", 90, 230);
+      ctx.fillStyle = COLORS.blue;
+      ctx.fillText("BLUE — Stick | NORMAL", 90, 260);
+    }
+
+    function drawHpBar() {
+      const barY = ARENA.y + ARENA.h + 80;
+      const barW = 380;
+      const barH = 36;
+
+      ctx.font = "bold 36px Courier New, monospace";
+      ctx.textAlign = "center";
+
+      const greenCenterX = W / 2 - 220;
+      const blueCenterX = W / 2 + 220;
+
+      drawSingleHp(greenBall, greenCenterX, barY, barW, barH, COLORS.hpGreen, "GREEN");
+      drawSingleHp(blueBall, blueCenterX, barY, barW, barH, COLORS.hpBlue, "BLUE");
+    }
+
+    function drawSingleHp(ball, centerX, barY, barW, barH, color, label) {
+      const x = centerX - barW / 2;
+
+      ctx.fillStyle = color;
+      ctx.fillText(`${label}: ${Math.max(0, Math.ceil(ball.hp))} HP`, centerX, barY - 16);
+
+      ctx.fillStyle = "#222222";
+      ctx.fillRect(x, barY, barW, barH);
+
+      const ratio = clamp(ball.hp / ball.maxHp, 0, 1);
+      ctx.fillStyle = color;
+      ctx.fillRect(x, barY, barW * ratio, barH);
+
+      ctx.strokeStyle = COLORS.white;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, barY, barW, barH);
+
+      if (ball.ironMiningActive) {
+        ctx.font = "bold 22px Courier New, monospace";
+        ctx.fillStyle = COLORS.ironMining;
+        ctx.fillText("MINING!", centerX, barY + barH + 30);
+        ctx.font = "bold 36px Courier New, monospace";
+      }
+    }
+
+    function drawDamageNumbers(dt) {
+      for (let i = damageNumbers.length - 1; i >= 0; i--) {
+        const d = damageNumbers[i];
+        d.life -= dt * 1000;
+        d.y += d.vy * dt;
+        const fadeStart = 500;
+        d.alpha = d.life > fadeStart ? 1 : clamp(d.life / fadeStart, 0, 1);
+
+        ctx.save();
+        ctx.globalAlpha = d.alpha;
+        ctx.font = "bold 58px Courier New, monospace";
+        ctx.fillStyle = d.color;
+        ctx.strokeStyle = COLORS.black;
+        ctx.lineWidth = 6;
+        ctx.lineJoin = "round";
+        ctx.textAlign = "center";
+        ctx.strokeText(d.text, d.x, d.y);
+        ctx.fillText(d.text, d.x, d.y);
+        ctx.restore();
+
+        if (d.life <= 0) damageNumbers.splice(i, 1);
+      }
+    }
+
+    function drawTextEffects(dt) {
+      for (let i = textEffects.length - 1; i >= 0; i--) {
+        const t = textEffects[i];
+        t.life -= dt * 1000;
+        t.y += t.vy;
+        t.alpha = clamp(t.life / 1800, 0, 1);
+
+        ctx.save();
+        ctx.globalAlpha = t.alpha;
+        ctx.font = `bold ${t.size}px Courier New, monospace`;
+        ctx.fillStyle = t.color;
+        ctx.strokeStyle = COLORS.black;
+        ctx.lineWidth = 5;
+        ctx.textAlign = "center";
+        ctx.strokeText(t.text, t.x, t.y);
+        ctx.fillText(t.text, t.x, t.y);
+        ctx.restore();
+
+        if (t.life <= 0) textEffects.splice(i, 1);
+      }
+    }
+
+    function drawImpactFlashes(dt) {
+      for (let i = impactFlashes.length - 1; i >= 0; i--) {
+        const f = impactFlashes[i];
+        f.life -= dt * 1000;
+        f.alpha = clamp(f.life / 180, 0, 1) * 0.85;
+        f.radius += dt * 120;
+
+        ctx.save();
+        ctx.globalAlpha = f.alpha;
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+        ctx.restore();
+
+        if (f.life <= 0) impactFlashes.splice(i, 1);
+      }
+    }
+
+    function drawWinScreen() {
+      if (!gameOver || !winner) return;
+
+      ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+      ctx.fillRect(0, 0, W, H);
+
+      const winText = winner === "green" ? "GREEN WINS" : "BLUE WINS";
+      const winColor = winner === "green" ? COLORS.green : COLORS.blue;
+
+      ctx.font = "bold 96px Courier New, monospace";
+      ctx.textAlign = "center";
+      ctx.strokeStyle = COLORS.black;
+      ctx.lineWidth = 10;
+      ctx.strokeText(winText, W / 2, H / 2);
+      ctx.fillStyle = winColor;
+      ctx.fillText(winText, W / 2, H / 2 - 40);
+    }
+
+    function updateScreenShake(dt) {
+      if (screenShake.duration > 0) {
+        screenShake.duration -= dt * 1000;
+        if (screenShake.duration <= 0) {
+          screenShake.intensity = 0;
+          screenShake.duration = 0;
+        }
+      }
+    }
+
+    function getShakeOffset() {
+      if (screenShake.duration <= 0) return { x: 0, y: 0 };
+      const t = screenShake.duration / 220;
+      const mag = screenShake.intensity * t;
+      return {
+        x: rand(-mag, mag),
+        y: rand(-mag, mag)
+      };
+    }
+
+    function update(dt) {
+      updateScreenShake(dt);
+
+      if (!gameOver) {
+        for (const ball of balls) {
+          ball.update(dt);
+        }
+        resolveBallCollision(greenBall, blueBall);
+      }
+
+      const shake = getShakeOffset();
+
+      ctx.save();
+      ctx.translate(shake.x, shake.y);
+
+      drawArena();
+      drawHeader();
+
+      for (const ball of balls) {
+        ball.draw();
+      }
+
+      drawImpactFlashes(dt);
+      drawDamageNumbers(dt);
+      drawTextEffects(dt);
+      drawHpBar();
+      drawWinScreen();
+
+      ctx.restore();
+    }
+
+    function loop(timestamp) {
+      if (!lastTime) lastTime = timestamp;
+      const dt = clamp((timestamp - lastTime) / 1000, 0, 0.033);
+      lastTime = timestamp;
+
+      update(dt);
+      requestAnimationFrame(loop);
+    }
+
+    restartBtn.addEventListener("click", () => {
+      initGame();
+    });
+
+    initGame();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
