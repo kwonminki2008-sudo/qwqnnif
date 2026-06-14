@@ -211,16 +211,23 @@
       frostAuraRadius: 168,
       frostAuraDamagePerSecond: 1,
       frostAuraSlowMultiplier: 0.7,
-      bomberInterval: 5000,
-      bomberFuseDuration: 1200,
-      bomberExplosionRadius: 88,
-      bomberExplosionDamage: 22,
+      bomberInterval: 4000,
+      bomberFuseDuration: 800,
+      bomberExplosionRadius: 114,
+      bomberExplosionDamage: 24,
       bomberKnockback: 520,
+      bomberRecoilCollisionDuration: 350,
       lancerInterval: 2000,
       lancerThrustDuration: 320,
       lancerThrustDamage: 9,
       lancerThrustKnockback: 280,
-      lancerThrustRange: 204
+      lancerThrustRange: 204,
+      vampireInterval: 5500,
+      vampireDashDuration: 220,
+      vampireDashSpeed: 2100,
+      vampireDashDamage: 14,
+      vampireDashHealRatio: 0.5,
+      vampireKnockback: 320
     };
 
     // ===== EDIT CHARACTERS HERE ONLY =====
@@ -375,10 +382,10 @@
         id: "bomber",
         name: "Bomber",
         teamColor: "#e67e22",
-        hp: 50,
+        hp: 55,
         baseDamage: 5,
         abilityName: "TIME BOMB",
-        abilityCooldown: 5000,
+        abilityCooldown: 4000,
         abilityType: "bomber",
         ballColor: "#d35400",
         weaponType: "bomb",
@@ -410,6 +417,26 @@
         weaponOffsetY: 0,
         radius: 72,
         speed: 11
+      },
+      {
+        id: "vampire",
+        name: "Vampire",
+        teamColor: "#6c1d45",
+        hp: 44,
+        baseDamage: 6,
+        abilityName: "BLOOD DASH",
+        abilityCooldown: 5500,
+        abilityType: "vampire",
+        ballColor: "#5b1230",
+        weaponType: "claw",
+        weaponColor: "#bdc3c7",
+        weaponImage: "claw",
+        ballImage: null,
+        weaponScale: 1.8,
+        weaponOffsetX: 5,
+        weaponOffsetY: 0,
+        radius: 58,
+        speed: 11
       }
     ];
     // ===== END CHARACTERS =====
@@ -431,6 +458,7 @@
     let timeBombs = [];
     let slashEffects = [];
     let ninjaAfterimages = [];
+    let vampireAfterimages = [];
     let bomberBurstEffects = [];
     let bombExplosionEffects = [];
     let gameOver = false;
@@ -1193,6 +1221,44 @@
       spawnImpactFlash(opponent.x, opponent.y, 28, "#bdc3c7");
     }
 
+    function applyBloodDashHeal(vampire, actualDamage) {
+      const heal = Math.round(actualDamage * ABILITY.vampireDashHealRatio);
+      if (heal <= 0) return;
+      const before = vampire.hp;
+      vampire.hp = Math.min(vampire.maxHp, vampire.hp + heal);
+      const actualHeal = vampire.hp - before;
+      if (actualHeal > 0) spawnHealNumber(vampire, actualHeal);
+    }
+
+    function startVampireDash(vampire, opponent) {
+      vampire.bloodDashActive = true;
+      vampire.bloodDashTimeLeft = ABILITY.vampireDashDuration;
+      vampire.bloodDashHit = false;
+      const dx = opponent.x - vampire.x;
+      const dy = opponent.y - vampire.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      vampire.vx = (dx / dist) * ABILITY.vampireDashSpeed;
+      vampire.vy = (dy / dist) * ABILITY.vampireDashSpeed;
+    }
+
+    function checkVampireDashHit(vampire) {
+      if (!vampire.bloodDashActive || vampire.bloodDashHit) return;
+      const opponent = balls.find((b) => b !== vampire);
+      if (!opponent || opponent.hp <= 0) return;
+      if (Math.hypot(opponent.x - vampire.x, opponent.y - vampire.y) > vampire.radius + opponent.radius) return;
+      vampire.bloodDashHit = true;
+      const actual = applyDamage(opponent, vampire, ABILITY.vampireDashDamage);
+      if (actual > 0) applyBloodDashHeal(vampire, actual);
+      const dx = opponent.x - vampire.x;
+      const dy = opponent.y - vampire.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      opponent.vx += (dx / dist) * ABILITY.vampireKnockback;
+      opponent.vy += (dy / dist) * ABILITY.vampireKnockback;
+      enforceSpeedLimits(opponent);
+      slashEffects.push({ x: opponent.x, y: opponent.y, life: 260, alpha: 1, blood: true });
+      spawnImpactFlash(opponent.x, opponent.y, 34, "#c0392b");
+    }
+
     function startNinjaDash(ninja, opponent) {
       ninja.shadowDashActive = true;
       ninja.shadowDashTimeLeft = ABILITY.ninjaDashDuration;
@@ -1518,6 +1584,19 @@
           ctx.lineTo(s.x + 18, s.y);
           ctx.lineTo(s.x + 10, s.y + 10);
           ctx.stroke();
+        } else if (s.blood) {
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(s.x - 18, s.y - 6);
+          ctx.lineTo(s.x + 16, s.y + 8);
+          ctx.stroke();
+          ctx.strokeStyle = "#c0392b";
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(s.x - 16, s.y - 4);
+          ctx.lineTo(s.x + 14, s.y + 6);
+          ctx.stroke();
         } else {
           ctx.strokeStyle = "#fff";
           ctx.lineWidth = 4;
@@ -1552,6 +1631,21 @@
       }
     }
 
+    function drawVampireAfterimages(dt) {
+      for (let i = vampireAfterimages.length - 1; i >= 0; i--) {
+        const img = vampireAfterimages[i];
+        img.life -= dt * 1000;
+        ctx.save();
+        ctx.globalAlpha = clamp(img.life / 180, 0, 1) * 0.38;
+        ctx.fillStyle = "#5b1230";
+        ctx.beginPath();
+        ctx.arc(img.x, img.y, img.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        if (img.life <= 0) vampireAfterimages.splice(i, 1);
+      }
+    }
+
     function drawKatana(x, y, scale) {
       ctx.save();
       ctx.translate(x, y);
@@ -1564,6 +1658,25 @@
       ctx.strokeStyle = "#95a5a6";
       ctx.lineWidth = 0.8;
       ctx.strokeRect(-1, -12, 2, 10);
+      ctx.restore();
+    }
+
+    function drawClaw(x, y, scale) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-0.3);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = "#922b21";
+      ctx.beginPath();
+      ctx.moveTo(0, 4);
+      ctx.lineTo(-3, -8);
+      ctx.lineTo(0, -4);
+      ctx.lineTo(3, -8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#bdc3c7";
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.restore();
     }
 
@@ -1781,9 +1894,9 @@
       spawnTextEffect(ball.x, ball.y - ball.radius - 48, "PARALYZED", "#00eaff", 30);
     }
 
-    function applyCollisionEffect(ball) {
+    function applyCollisionEffect(ball, durationMs) {
       if (ball.paralyzedTimeLeft > 0) return;
-      ball.collisionEffectTimeLeft = ABILITY.collisionDuration;
+      ball.collisionEffectTimeLeft = durationMs ?? ABILITY.collisionDuration;
       const normalScale = getSpeedStatScale(ball.moveSpeed ?? PHYSICS.SPEED_STAT_BASELINE);
       const speed = PHYSICS.BASE_MOVEMENT_MAX_SPEED * normalScale * ABILITY.collisionSpeedMultiplier;
       const angle = rand(0, Math.PI * 2);
@@ -1795,8 +1908,13 @@
     function handleBomberCollisionHit(a, b, contactX, contactY) {
       if (a.ability !== "bomber" && b.ability !== "bomber") return;
       spawnBomberCollisionBurst(contactX, contactY);
-      applyCollisionEffect(a);
-      applyCollisionEffect(b);
+      if (a.ability === "bomber") {
+        applyCollisionEffect(b, ABILITY.collisionDuration);
+        applyCollisionEffect(a, ABILITY.bomberRecoilCollisionDuration);
+      } else {
+        applyCollisionEffect(a, ABILITY.collisionDuration);
+        applyCollisionEffect(b, ABILITY.bomberRecoilCollisionDuration);
+      }
     }
 
     function updateLightning(dt) {
@@ -1935,7 +2053,7 @@
         this.trail = [];
         this.collisionCooldown = 0;
         this.abilityCooldown = config.abilityCooldown ?? 0;
-        const cdAbilities = ["ironMining", "scissorhands", "paladin", "ninja", "frost", "bomber", "lancer"];
+        const cdAbilities = ["ironMining", "scissorhands", "paladin", "ninja", "frost", "bomber", "lancer", "vampire"];
         this.abilityTimer = cdAbilities.includes(config.ability) ? this.abilityCooldown : 0;
         this.ironMiningActive = false;
         this.ironMiningTimeLeft = 0;
@@ -1960,6 +2078,9 @@
         this.thrustTimeLeft = 0;
         this.thrustHit = false;
         this.thrustAngle = 0;
+        this.bloodDashActive = false;
+        this.bloodDashTimeLeft = 0;
+        this.bloodDashHit = false;
         this.awakenedEyeTimeLeft = 0;
         this.paralyzedTimeLeft = 0;
         this.savedVx = 0;
@@ -2014,7 +2135,7 @@
           this.onNinjaWallBounce();
         }
 
-        if (!this.shadowDashActive) {
+        if (!this.shadowDashActive && !this.bloodDashActive) {
           enforceSpeedLimits(this);
         }
       }
@@ -2069,6 +2190,16 @@
           checkNinjaDashHit(this);
           if (this.shadowDashTimeLeft <= 0) {
             this.shadowDashActive = false;
+            enforceSpeedLimits(this);
+          }
+        }
+
+        if (this.bloodDashActive) {
+          vampireAfterimages.push({ x: this.x, y: this.y, radius: this.radius * 0.85, life: 180 });
+          this.bloodDashTimeLeft -= dt * 1000;
+          checkVampireDashHit(this);
+          if (this.bloodDashTimeLeft <= 0) {
+            this.bloodDashActive = false;
             enforceSpeedLimits(this);
           }
         }
@@ -2206,6 +2337,16 @@
           }
         }
 
+        if (this.ability === "vampire") {
+          this.abilityTimer -= dt * 1000;
+          if (this.abilityTimer <= 0 && !this.bloodDashActive) {
+            this.abilityTimer = ABILITY.vampireInterval;
+            const opponent = balls.find((b) => b !== this);
+            if (opponent) startVampireDash(this, opponent);
+            spawnTextEffect(this.x, this.y - this.radius - 40, "BLOOD DASH!", "#c0392b", 34);
+          }
+        }
+
         if (this.ability === "archer") {
           const opponent = balls.find((b) => b !== this);
           updateArcherMeleeMode(this, opponent);
@@ -2312,6 +2453,46 @@
           ctx.arc(this.x + r * 0.22, this.y - r * 0.18, r * 0.05, 0, Math.PI * 2);
           ctx.fill();
         }
+        ctx.restore();
+      }
+
+      drawVampireCape() {
+        if (this.ability !== "vampire") return;
+        const r = this.radius;
+        const back = Math.atan2(this.vy, this.vx) + Math.PI;
+        const bx = this.x + Math.cos(back) * r * 0.35;
+        const by = this.y + Math.sin(back) * r * 0.35;
+        ctx.save();
+        ctx.fillStyle = "rgba(44, 12, 30, 0.88)";
+        ctx.beginPath();
+        ctx.moveTo(this.x + Math.cos(back + 0.5) * r * 0.5, this.y + Math.sin(back + 0.5) * r * 0.5);
+        ctx.lineTo(bx, by);
+        ctx.lineTo(this.x + Math.cos(back - 0.5) * r * 0.5, this.y + Math.sin(back - 0.5) * r * 0.5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "#c0392b";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      drawVampireDetails() {
+        if (this.ability !== "vampire") return;
+        const r = this.radius;
+        ctx.save();
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.moveTo(this.x - r * 0.14, this.y + r * 0.02);
+        ctx.lineTo(this.x - r * 0.1, this.y + r * 0.16);
+        ctx.lineTo(this.x - r * 0.06, this.y + r * 0.02);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(this.x + r * 0.14, this.y + r * 0.02);
+        ctx.lineTo(this.x + r * 0.1, this.y + r * 0.16);
+        ctx.lineTo(this.x + r * 0.06, this.y + r * 0.02);
+        ctx.closePath();
+        ctx.fill();
         ctx.restore();
       }
 
@@ -2614,6 +2795,7 @@
         ctx.save();
         this.drawTrail();
         this.drawFrostAura();
+        this.drawVampireCape();
 
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
@@ -2634,12 +2816,20 @@
         this.drawFrostDetails();
         this.drawBomberDetails();
         this.drawFace();
+        this.drawVampireDetails();
         this.drawPaladinHelmet();
         this.drawLancerHelmet();
         if (this.shadowDashActive) {
           ctx.beginPath();
           ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.glowPhase * 5) * 3, 0, Math.PI * 2);
           ctx.strokeStyle = `rgba(155, 89, 182, ${0.55 + Math.sin(this.glowPhase * 4) * 0.2})`;
+          ctx.lineWidth = 4;
+          ctx.stroke();
+        }
+        if (this.bloodDashActive) {
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.glowPhase * 5) * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(192, 57, 43, ${0.55 + Math.sin(this.glowPhase * 4) * 0.2})`;
           ctx.lineWidth = 4;
           ctx.stroke();
         }
@@ -2708,6 +2898,8 @@
           drawHandBomb(0, 0, this.weaponScale);
         } else if (this.weapon === "spear" || this.ability === "lancer") {
           drawSpear(0, 0, this.weaponScale, false);
+        } else if (this.weapon === "claw" || this.ability === "vampire") {
+          drawClaw(0, 0, this.weaponScale);
         }
 
         ctx.restore();
@@ -2917,8 +3109,8 @@
         weaponScale: char.weaponScale,
         weaponOffsetX: char.weaponOffsetX,
         weaponOffsetY: char.weaponOffsetY,
-        ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : char.abilityType === "scissorhands" ? "scissorhands" : char.abilityType === "paladin" ? "paladin" : char.abilityType === "ninja" ? "ninja" : char.abilityType === "frost" ? "frost" : char.abilityType === "bomber" ? "bomber" : char.abilityType === "lancer" ? "lancer" : "normal",
-        abilityCooldown: char.abilityType === "paladin" ? (char.abilityCooldown || ABILITY.paladinInterval) : char.abilityType === "scissorhands" ? (char.abilityCooldown || ABILITY.scissorInterval) : char.abilityType === "ninja" ? (char.abilityCooldown || ABILITY.ninjaInterval) : char.abilityType === "frost" ? (char.abilityCooldown || ABILITY.frostInterval) : char.abilityType === "bomber" ? (char.abilityCooldown || ABILITY.bomberInterval) : char.abilityType === "lancer" ? (char.abilityCooldown || ABILITY.lancerInterval) : char.abilityCooldown || ABILITY.ironMiningInterval,
+        ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : char.abilityType === "scissorhands" ? "scissorhands" : char.abilityType === "paladin" ? "paladin" : char.abilityType === "ninja" ? "ninja" : char.abilityType === "frost" ? "frost" : char.abilityType === "bomber" ? "bomber" : char.abilityType === "lancer" ? "lancer" : char.abilityType === "vampire" ? "vampire" : "normal",
+        abilityCooldown: char.abilityType === "paladin" ? (char.abilityCooldown || ABILITY.paladinInterval) : char.abilityType === "scissorhands" ? (char.abilityCooldown || ABILITY.scissorInterval) : char.abilityType === "ninja" ? (char.abilityCooldown || ABILITY.ninjaInterval) : char.abilityType === "frost" ? (char.abilityCooldown || ABILITY.frostInterval) : char.abilityType === "bomber" ? (char.abilityCooldown || ABILITY.bomberInterval) : char.abilityType === "lancer" ? (char.abilityCooldown || ABILITY.lancerInterval) : char.abilityType === "vampire" ? (char.abilityCooldown || ABILITY.vampireInterval) : char.abilityCooldown || ABILITY.ironMiningInterval,
         baseDamage: char.baseDamage,
         abilityDamage: char.abilityDamage,
         meleeDamage: char.meleeDamage,
@@ -3093,12 +3285,12 @@
       const midY = (a.y + b.y) / 2;
 
       if (a.collisionCooldown <= 0 && b.collisionCooldown <= 0) {
-          if (!(a.ability === "ninja" && a.shadowDashActive)) {
+          if (!(a.ability === "ninja" && a.shadowDashActive) && !(a.ability === "vampire" && a.bloodDashActive)) {
             applyDamage(b, a, getAttackDamage(a, b), {
               lifesteal: a.ability === "scissorhands" && a.scissorActive
             });
           }
-          if (!(b.ability === "ninja" && b.shadowDashActive)) {
+          if (!(b.ability === "ninja" && b.shadowDashActive) && !(b.ability === "vampire" && b.bloodDashActive)) {
             applyDamage(a, b, getAttackDamage(b, a), {
               lifesteal: b.ability === "scissorhands" && b.scissorActive
             });
@@ -3130,6 +3322,7 @@
       timeBombs = [];
       slashEffects = [];
       ninjaAfterimages = [];
+      vampireAfterimages = [];
       bomberBurstEffects = [];
       bombExplosionEffects = [];
       gameOver = false;
@@ -3250,6 +3443,14 @@
           icon: "lancer"
         };
       }
+      if (ball.ability === "vampire") {
+        return {
+          ready: ball.abilityTimer <= 0 && !ball.bloodDashActive,
+          remainingMs: Math.max(0, ball.abilityTimer),
+          totalMs: ball.abilityCooldown || ABILITY.vampireInterval,
+          icon: "vampire"
+        };
+      }
       return { ready: true, remainingMs: 0, totalMs: 0, icon: "stick" };
     }
 
@@ -3364,6 +3565,24 @@
         ctx.lineTo(-s * 0.1, -s * 0.32);
         ctx.lineTo(s * 0.1, -s * 0.32);
         ctx.closePath();
+        ctx.fill();
+      } else if (icon === "vampire") {
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.12, s * 0.15);
+        ctx.lineTo(-s * 0.06, -s * 0.2);
+        ctx.lineTo(0, s * 0.15);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(s * 0.12, s * 0.15);
+        ctx.lineTo(s * 0.06, -s * 0.2);
+        ctx.lineTo(0, s * 0.15);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#c0392b";
+        ctx.beginPath();
+        ctx.arc(0, s * 0.28, s * 0.1, 0, Math.PI * 2);
         ctx.fill();
       } else {
         ctx.strokeStyle = "#5c3a1e";
@@ -3697,6 +3916,7 @@
       drawHeader();
       drawIcePrisons();
       drawNinjaAfterimages(dt);
+      drawVampireAfterimages(dt);
 
       for (const ball of balls) {
         ball.draw();
