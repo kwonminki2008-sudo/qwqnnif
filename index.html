@@ -208,7 +208,7 @@
       frostPrisonDamage: 14,
       frostSlowDuration: 2000,
       frostSlowMultiplier: 0.5,
-      frostAuraRadius: 52,
+      frostAuraRadius: 84,
       frostAuraDamagePerSecond: 1,
       frostAuraSlowMultiplier: 0.7,
       bomberInterval: 5000,
@@ -216,11 +216,11 @@
       bomberExplosionRadius: 88,
       bomberExplosionDamage: 22,
       bomberKnockback: 520,
-      lancerInterval: 6500,
-      lancerThrustDuration: 800,
-      lancerThrustDamage: 18,
-      lancerThrustKnockback: 450,
-      lancerThrustReach: 42
+      lancerInterval: 2000,
+      lancerThrustDuration: 320,
+      lancerThrustDamage: 9,
+      lancerThrustKnockback: 280,
+      lancerThrustRange: 102
     };
 
     // ===== EDIT CHARACTERS HERE ONLY =====
@@ -395,10 +395,10 @@
         id: "lancer",
         name: "Lancer",
         teamColor: "#34495e",
-        hp: 55,
+        hp: 50,
         baseDamage: 6,
-        abilityName: "PIERCING THRUST",
-        abilityCooldown: 6500,
+        abilityName: "SPEAR TECHNIQUE",
+        abilityCooldown: 2000,
         abilityType: "lancer",
         ballColor: "#3d5a80",
         weaponType: "spear",
@@ -1130,7 +1130,7 @@
         const opponent = balls.find((b) => b !== frost);
         if (!opponent || opponent.hp <= 0) continue;
         const dist = Math.hypot(opponent.x - frost.x, opponent.y - frost.y);
-        const inAura = dist <= ABILITY.frostAuraRadius + opponent.radius * 0.28;
+        const inAura = dist <= ABILITY.frostAuraRadius + opponent.radius * 0.45;
         if (!inAura) {
           opponent.frostAuraTickTimer = 0;
           continue;
@@ -1154,18 +1154,30 @@
       return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
     }
 
+    function startLancerThrust(lancer) {
+      const opponent = balls.find((b) => b !== lancer);
+      if (opponent) {
+        lancer.thrustAngle = Math.atan2(opponent.y - lancer.y, opponent.x - lancer.x);
+      } else {
+        lancer.thrustAngle = lancer.weaponAngle;
+      }
+      lancer.thrustActive = true;
+      lancer.thrustTimeLeft = ABILITY.lancerThrustDuration;
+      lancer.thrustHit = false;
+    }
+
     function checkLancerThrustHit(lancer) {
       if (!lancer.thrustActive || lancer.thrustHit) return;
       const opponent = balls.find((b) => b !== lancer);
       if (!opponent || opponent.hp <= 0) return;
-      const angle = lancer.weaponAngle;
-      const start = lancer.radius * 0.35;
-      const end = lancer.radius + lancer.weaponOffsetX + ABILITY.lancerThrustReach;
+      const angle = lancer.thrustAngle;
+      const start = lancer.radius * 0.25;
+      const end = lancer.radius + ABILITY.lancerThrustRange;
       const sx = lancer.x + Math.cos(angle) * start;
       const sy = lancer.y + Math.sin(angle) * start;
       const ex = lancer.x + Math.cos(angle) * end;
       const ey = lancer.y + Math.sin(angle) * end;
-      if (pointToSegmentDist(opponent.x, opponent.y, sx, sy, ex, ey) > opponent.radius + 10) return;
+      if (pointToSegmentDist(opponent.x, opponent.y, sx, sy, ex, ey) > opponent.radius + 8) return;
       lancer.thrustHit = true;
       applyDamage(opponent, lancer, ABILITY.lancerThrustDamage);
       const dx = opponent.x - lancer.x;
@@ -1174,8 +1186,8 @@
       opponent.vx += (dx / dist) * ABILITY.lancerThrustKnockback;
       opponent.vy += (dy / dist) * ABILITY.lancerThrustKnockback;
       enforceSpeedLimits(opponent);
-      slashEffects.push({ x: opponent.x, y: opponent.y, life: 240, alpha: 1, stab: true });
-      spawnImpactFlash(opponent.x, opponent.y, 34, "#ffd700");
+      slashEffects.push({ x: opponent.x, y: opponent.y, life: 220, alpha: 1, stab: true });
+      spawnImpactFlash(opponent.x, opponent.y, 28, "#ffd700");
     }
 
     function startNinjaDash(ninja, opponent) {
@@ -1944,6 +1956,7 @@
         this.thrustActive = false;
         this.thrustTimeLeft = 0;
         this.thrustHit = false;
+        this.thrustAngle = 0;
         this.awakenedEyeTimeLeft = 0;
         this.paralyzedTimeLeft = 0;
         this.savedVx = 0;
@@ -2185,10 +2198,8 @@
           }
           if (this.abilityTimer <= 0 && !this.thrustActive) {
             this.abilityTimer = ABILITY.lancerInterval;
-            this.thrustActive = true;
-            this.thrustTimeLeft = ABILITY.lancerThrustDuration;
-            this.thrustHit = false;
-            spawnTextEffect(this.x, this.y - this.radius - 40, "PIERCING THRUST!", "#f1c40f", 34);
+            startLancerThrust(this);
+            spawnTextEffect(this.x, this.y - this.radius - 40, "SPEAR TECHNIQUE!", "#f1c40f", 34);
           }
         }
 
@@ -2332,16 +2343,77 @@
 
       drawFrostAura() {
         if (this.ability !== "frost" || this.hp <= 0) return;
+        const auraR = ABILITY.frostAuraRadius;
         ctx.save();
-        const pulse = 0.22 + Math.sin(this.glowPhase * 2.5) * 0.08;
+        const pulse = 0.38 + Math.sin(this.glowPhase * 2.5) * 0.12;
         ctx.globalAlpha = pulse;
         ctx.strokeStyle = "#85c1e9";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, auraR, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = pulse * 0.35;
+        ctx.fillStyle = "rgba(174, 214, 241, 0.22)";
+        ctx.fill();
+        ctx.globalAlpha = pulse * 0.75;
+        for (let i = 0; i < 6; i++) {
+          const angle = this.glowPhase * 1.2 + (i / 6) * Math.PI * 2;
+          const px = this.x + Math.cos(angle) * auraR;
+          const py = this.y + Math.sin(angle) * auraR;
+          ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
+          ctx.beginPath();
+          ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#aed6f1";
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(px + Math.cos(angle + 0.6) * 5, py + Math.sin(angle + 0.6) * 5);
+          ctx.moveTo(px, py);
+          ctx.lineTo(px + Math.cos(angle - 0.6) * 5, py + Math.sin(angle - 0.6) * 5);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      drawLancerSpearThrust() {
+        if (this.ability !== "lancer" || !this.thrustActive) return;
+        const progress = 1 - clamp(this.thrustTimeLeft / ABILITY.lancerThrustDuration, 0, 1);
+        const angle = this.thrustAngle;
+        const start = this.radius * 0.28;
+        const end = start + ABILITY.lancerThrustRange * (0.35 + progress * 0.65);
+        const sx = this.x + Math.cos(angle) * start;
+        const sy = this.y + Math.sin(angle) * start;
+        const ex = this.x + Math.cos(angle) * end;
+        const ey = this.y + Math.sin(angle) * end;
+        ctx.save();
+        ctx.strokeStyle = "#5c3a1e";
+        ctx.lineWidth = 4;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+        ctx.strokeStyle = "#ecf0f1";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+        ctx.fillStyle = "#bdc3c7";
+        ctx.beginPath();
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex + Math.cos(angle + 2.5) * 10, ey + Math.sin(angle + 2.5) * 10);
+        ctx.lineTo(ex + Math.cos(angle - 2.5) * 10, ey + Math.sin(angle - 2.5) * 10);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 0.45 * (1 - progress * 0.5);
+        ctx.strokeStyle = "#fff";
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(this.x, this.y, ABILITY.frostAuraRadius, 0, Math.PI * 2);
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(ex, ey);
         ctx.stroke();
-        ctx.fillStyle = "rgba(174, 214, 241, 0.08)";
-        ctx.fill();
         ctx.restore();
       }
 
@@ -2522,6 +2594,7 @@
       draw() {
         ctx.save();
         this.drawTrail();
+        this.drawFrostAura();
 
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
@@ -2539,7 +2612,6 @@
         }
 
         this.drawNinjaHeadband();
-        this.drawFrostAura();
         this.drawFrostDetails();
         this.drawBomberDetails();
         this.drawFace();
@@ -2574,15 +2646,13 @@
         }
 
         if (this.thrustActive) {
-          ctx.beginPath();
-          ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.glowPhase * 5) * 2, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(241, 196, 15, ${0.5 + Math.sin(this.glowPhase * 4) * 0.2})`;
-          ctx.lineWidth = 3;
-          ctx.stroke();
+          this.drawLancerSpearThrust();
         }
 
         this.drawScissorSlashFlash();
-        this.drawWeapon();
+        if (!(this.ability === "lancer" && this.thrustActive)) {
+          this.drawWeapon();
+        }
         ctx.restore();
       }
 
@@ -2618,7 +2688,7 @@
         } else if (this.weapon === "bomb" || this.ability === "bomber") {
           drawHandBomb(0, 0, this.weaponScale);
         } else if (this.weapon === "spear" || this.ability === "lancer") {
-          drawSpear(0, 0, this.weaponScale, this.thrustActive);
+          drawSpear(0, 0, this.weaponScale, false);
         }
 
         ctx.restore();
