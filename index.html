@@ -186,7 +186,13 @@
       scissorLifestealRatio: 0.5,
       archerMeleeEnterPad: 32,
       archerMeleeExitPad: 56,
-      archerModeFlashMs: 400
+      archerModeFlashMs: 400,
+      paladinInterval: 9000,
+      paladinDropDamage: 30,
+      paladinTelegraphMs: 380,
+      paladinFallSpeed: 1680,
+      paladinKnockback: 720,
+      arrowSpeed: 1320
     };
 
     // ===== EDIT CHARACTERS HERE ONLY =====
@@ -216,7 +222,7 @@
         name: "Stick",
         teamColor: "#0074d9",
         hp: 100,
-        baseDamage: 10,
+        baseDamage: 8,
         abilityName: "NORMAL",
         abilityCooldown: 0,
         abilityType: "normal",
@@ -275,6 +281,27 @@
         weaponOffsetY: 0,
         radius: 60,
         speed: 12
+      },
+      {
+        id: "paladin",
+        name: "Paladin",
+        teamColor: "#f5f5f5",
+        hp: 65,
+        baseDamage: 6,
+        abilityDamage: 30,
+        abilityName: "EXCALIBUR",
+        abilityCooldown: 9000,
+        abilityType: "paladin",
+        ballColor: "#ecf0f1",
+        weaponType: "excalibur",
+        weaponColor: "#ffd700",
+        weaponImage: "excalibur",
+        ballImage: null,
+        weaponScale: 2.0,
+        weaponOffsetX: 6,
+        weaponOffsetY: 0,
+        radius: 62,
+        speed: 10
       }
     ];
     // ===== END CHARACTERS =====
@@ -290,6 +317,8 @@
     let arrows = [];
     let chompEffects = [];
     let bloodDrops = [];
+    let excaliburDrops = [];
+    let holyShockwaves = [];
     let gameOver = false;
     let winner = null;
     let winningBall = null;
@@ -738,11 +767,159 @@
       }
     }
 
+    function spawnHolyShockwave(x, y) {
+      holyShockwaves.push({ x, y, life: 420, alpha: 1, radius: 18 });
+    }
+
+    function spawnExcaliburDrop(fromBall, toBall) {
+      excaliburDrops.push({
+        fromBall,
+        targetBall: toBall,
+        x: clamp(toBall.x, ARENA.x + 36, ARENA.x + ARENA.w - 36),
+        y: ARENA.y - 90,
+        telegraphMs: ABILITY.paladinTelegraphMs,
+        fallSpeed: ABILITY.paladinFallSpeed,
+        damage: ABILITY.paladinDropDamage,
+        active: true,
+        hit: false
+      });
+    }
+
+    function updateExcaliburDrops(dt) {
+      if (gameOver) return;
+      for (let i = excaliburDrops.length - 1; i >= 0; i--) {
+        const drop = excaliburDrops[i];
+        if (!drop.active) {
+          excaliburDrops.splice(i, 1);
+          continue;
+        }
+
+        if (drop.telegraphMs > 0) {
+          drop.telegraphMs -= dt * 1000;
+          continue;
+        }
+
+        drop.y += drop.fallSpeed * dt;
+
+        const target = drop.targetBall;
+        if (!drop.hit && target && target.hp > 0) {
+          const dx = target.x - drop.x;
+          const hitX = Math.abs(dx) <= target.radius + 26;
+          const hitY = drop.y >= target.y - target.radius * 0.35 && drop.y <= target.y + target.radius + 36;
+          if (hitX && hitY) {
+            drop.hit = true;
+            drop.active = false;
+            applyDamage(target, drop.fromBall, drop.damage);
+            const nx = dx === 0 ? 0 : dx / Math.abs(dx);
+            target.vx += nx * ABILITY.paladinKnockback * 0.55;
+            target.vy += ABILITY.paladinKnockback * 0.85;
+            enforceSpeedLimits(target);
+            spawnHolyShockwave(target.x, target.y);
+            spawnImpactFlash(target.x, target.y, 76);
+            spawnImpactFlash(target.x, target.y, 42);
+            triggerScreenShake(18, 260);
+          }
+        }
+
+        if (drop.y > ARENA.y + ARENA.h + 100) {
+          drop.active = false;
+        }
+      }
+    }
+
+    function drawExcaliburBlade(x, y, scale, pointingDown) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(pointingDown ? Math.PI / 2 : 0);
+      ctx.scale(scale, scale);
+
+      ctx.fillStyle = "#ffd700";
+      ctx.strokeStyle = "#b8860b";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(0, -18);
+      ctx.lineTo(-3.5, 2);
+      ctx.lineTo(-1.5, 2);
+      ctx.lineTo(-1.5, 8);
+      ctx.lineTo(1.5, 8);
+      ctx.lineTo(1.5, 2);
+      ctx.lineTo(3.5, 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "#3498db";
+      ctx.fillRect(-5, 2, 10, 2);
+      ctx.fillStyle = "#d4af37";
+      ctx.fillRect(-1.5, 8, 3, 5);
+      ctx.beginPath();
+      ctx.arc(0, 14, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.65)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, -16);
+      ctx.lineTo(0, 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawExcaliburDrops() {
+      for (const drop of excaliburDrops) {
+        if (!drop.active) continue;
+
+        if (drop.telegraphMs > 0 && drop.targetBall) {
+          const pulse = 0.45 + Math.sin(Date.now() * 0.02) * 0.25;
+          ctx.save();
+          ctx.globalAlpha = pulse;
+          ctx.strokeStyle = "#ffd700";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 5]);
+          ctx.beginPath();
+          ctx.moveTo(drop.x, drop.targetBall.y - drop.targetBall.radius - 28);
+          ctx.lineTo(drop.x, drop.targetBall.y + drop.targetBall.radius + 10);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.arc(drop.x, drop.targetBall.y, drop.targetBall.radius + 14, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+          drawExcaliburBlade(drop.x, ARENA.y - 50, 2.4, true);
+        } else {
+          drawExcaliburBlade(drop.x, drop.y, 2.6, true);
+        }
+      }
+    }
+
+    function drawHolyShockwaves(dt) {
+      for (let i = holyShockwaves.length - 1; i >= 0; i--) {
+        const s = holyShockwaves[i];
+        s.life -= dt * 1000;
+        s.radius += dt * 220;
+        s.alpha = clamp(s.life / 420, 0, 1);
+        ctx.save();
+        ctx.globalAlpha = s.alpha * 0.75;
+        ctx.strokeStyle = "#fff9c4";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = s.alpha * 0.35;
+        ctx.fillStyle = "#ffd700";
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.radius * 0.55, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        if (s.life <= 0) holyShockwaves.splice(i, 1);
+      }
+    }
+
     function spawnArrow(fromBall, toBall) {
       const dx = toBall.x - fromBall.x;
       const dy = toBall.y - fromBall.y;
       const dist = Math.hypot(dx, dy) || 1;
-      const speed = 920;
+      const speed = ABILITY.arrowSpeed;
       arrows.push({
         x: fromBall.x,
         y: fromBall.y,
@@ -1014,7 +1191,8 @@
         this.glowPhase = 0;
         this.trail = [];
         this.collisionCooldown = 0;
-        this.abilityTimer = (config.ability === "ironMining" || config.ability === "scissorhands") ? config.abilityCooldown : 0;
+        this.abilityCooldown = config.abilityCooldown ?? 0;
+        this.abilityTimer = (config.ability === "ironMining" || config.ability === "scissorhands" || config.ability === "paladin") ? this.abilityCooldown : 0;
         this.ironMiningActive = false;
         this.ironMiningTimeLeft = 0;
         this.scissorActive = false;
@@ -1177,6 +1355,16 @@
           }
         }
 
+        if (this.ability === "paladin") {
+          this.abilityTimer -= dt * 1000;
+          if (this.abilityTimer <= 0) {
+            this.abilityTimer = ABILITY.paladinInterval;
+            const opponent = balls.find((b) => b !== this);
+            if (opponent) spawnExcaliburDrop(this, opponent);
+            spawnTextEffect(this.x, this.y - this.radius - 40, "EXCALIBUR!", "#ffd700", 40);
+          }
+        }
+
         if (this.ability === "archer") {
           const opponent = balls.find((b) => b !== this);
           updateArcherMeleeMode(this, opponent);
@@ -1228,6 +1416,34 @@
         ctx.arc(this.x - eyeOffset + lookX * 1.3, this.y - eyeOffset * 0.5 + lookY * 1.3, eyeR * 0.55, 0, Math.PI * 2);
         ctx.arc(this.x + eyeOffset + lookX * 1.3, this.y - eyeOffset * 0.5 + lookY * 1.3, eyeR * 0.55, 0, Math.PI * 2);
         ctx.fill();
+      }
+
+      drawPaladinHelmet() {
+        if (this.ability !== "paladin") return;
+
+        ctx.save();
+        ctx.fillStyle = "#95a5a6";
+        ctx.strokeStyle = "#566573";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y - this.radius * 0.18, this.radius * 0.62, Math.PI * 1.05, Math.PI * 1.95);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = "#bdc3c7";
+        ctx.fillRect(this.x - this.radius * 0.55, this.y - this.radius * 0.08, this.radius * 1.1, this.radius * 0.14);
+        ctx.strokeStyle = "#7f8c8d";
+        ctx.strokeRect(this.x - this.radius * 0.55, this.y - this.radius * 0.08, this.radius * 1.1, this.radius * 0.14);
+
+        ctx.fillStyle = "#ffd700";
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y - this.radius * 0.72);
+        ctx.lineTo(this.x - 5, this.y - this.radius * 0.48);
+        ctx.lineTo(this.x + 5, this.y - this.radius * 0.48);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
       }
 
       drawParalysisEffect() {
@@ -1312,6 +1528,7 @@
         ctx.stroke();
 
         this.drawFace();
+        this.drawPaladinHelmet();
         this.drawParalysisEffect();
         this.drawBleedEffect();
 
@@ -1359,6 +1576,8 @@
           drawScissorHand(0, 0, false, openAmt, this.weaponScale, this.scissorActive);
           ctx.translate(-offset * 2, 0);
           drawScissorHand(0, 0, true, openAmt, this.weaponScale * 0.92, this.scissorActive);
+        } else if (this.weapon === "excalibur" || this.ability === "paladin") {
+          drawExcaliburBlade(0, 0, this.weaponScale, false);
         }
 
         ctx.restore();
@@ -1568,8 +1787,8 @@
         weaponScale: char.weaponScale,
         weaponOffsetX: char.weaponOffsetX,
         weaponOffsetY: char.weaponOffsetY,
-        ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : char.abilityType === "scissorhands" ? "scissorhands" : "normal",
-        abilityCooldown: char.abilityCooldown || ABILITY.ironMiningInterval,
+        ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : char.abilityType === "scissorhands" ? "scissorhands" : char.abilityType === "paladin" ? "paladin" : "normal",
+        abilityCooldown: char.abilityType === "paladin" ? (char.abilityCooldown || ABILITY.paladinInterval) : char.abilityType === "scissorhands" ? (char.abilityCooldown || ABILITY.scissorInterval) : char.abilityCooldown || ABILITY.ironMiningInterval,
         baseDamage: char.baseDamage,
         abilityDamage: char.abilityDamage,
         meleeDamage: char.meleeDamage,
@@ -1769,6 +1988,8 @@
       arrows = [];
       chompEffects = [];
       bloodDrops = [];
+      excaliburDrops = [];
+      holyShockwaves = [];
       gameOver = false;
       winner = null;
       winningBall = null;
@@ -1820,6 +2041,119 @@
         drawOutlinedText("VS", W / 2, 210, "#666", COLORS.black, 3);
         drawFittedOutlinedText(p2Label, W / 2 + 210, 210, 360, 34, family, blueBall.color, "left");
       }
+    }
+
+    function getAbilityCooldownState(ball) {
+      if (ball.ability === "archer") {
+        return {
+          ready: ball.projectileTimer <= 0,
+          remainingMs: Math.max(0, ball.projectileTimer),
+          totalMs: ball.projectileCooldown,
+          icon: "archer"
+        };
+      }
+      if (ball.ability === "ironMining") {
+        return {
+          ready: ball.abilityTimer <= 0,
+          remainingMs: Math.max(0, ball.abilityTimer),
+          totalMs: ball.abilityCooldown || ABILITY.ironMiningInterval,
+          icon: "hammer"
+        };
+      }
+      if (ball.ability === "scissorhands") {
+        return {
+          ready: ball.abilityTimer <= 0,
+          remainingMs: Math.max(0, ball.abilityTimer),
+          totalMs: ball.abilityCooldown || ABILITY.scissorInterval,
+          icon: "scissors"
+        };
+      }
+      if (ball.ability === "paladin") {
+        return {
+          ready: ball.abilityTimer <= 0,
+          remainingMs: Math.max(0, ball.abilityTimer),
+          totalMs: ball.abilityCooldown || ABILITY.paladinInterval,
+          icon: "paladin"
+        };
+      }
+      return { ready: true, remainingMs: 0, totalMs: 0, icon: "stick" };
+    }
+
+    function drawSkillIconGlyph(icon, cx, cy, size) {
+      const s = size * 0.38;
+      ctx.save();
+      ctx.translate(cx, cy);
+      if (icon === "hammer") {
+        ctx.fillStyle = "#6b4f1d";
+        ctx.fillRect(-s * 0.15, -s * 0.1, s * 0.3, s * 0.9);
+        ctx.fillStyle = "#aaa";
+        ctx.fillRect(-s * 0.55, -s * 0.55, s * 1.1, s * 0.35);
+        ctx.strokeStyle = "#ffd700";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(0, s * 0.5);
+        ctx.lineTo(0, -s * 0.2);
+        ctx.stroke();
+      } else if (icon === "scissors") {
+        ctx.strokeStyle = "#bdc3c7";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.35, s * 0.35);
+        ctx.lineTo(0, -s * 0.45);
+        ctx.lineTo(s * 0.35, s * 0.35);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.35, -s * 0.35);
+        ctx.lineTo(0, s * 0.45);
+        ctx.lineTo(s * 0.35, -s * 0.35);
+        ctx.stroke();
+      } else if (icon === "archer") {
+        ctx.strokeStyle = "#8b4513";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(s * 0.15, 0, s * 0.55, -Math.PI * 0.45, Math.PI * 0.45);
+        ctx.stroke();
+        ctx.strokeStyle = "#ccc";
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.5, 0);
+        ctx.lineTo(s * 0.65, 0);
+        ctx.stroke();
+      } else if (icon === "paladin") {
+        drawExcaliburBlade(0, 0, s * 0.22, false);
+      } else {
+        ctx.strokeStyle = "#5c3a1e";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(0, s * 0.45);
+        ctx.lineTo(0, -s * 0.55);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawAbilityCooldownIcon(ball, boxX, boxY, boxSize, isLeft) {
+      const state = getAbilityCooldownState(ball);
+      ctx.save();
+      ctx.fillStyle = state.ready ? "#2a2a2a" : "#1a1a1a";
+      ctx.strokeStyle = state.ready ? "#ffd700" : "#555";
+      ctx.lineWidth = state.ready ? 3 : 2;
+      ctx.fillRect(boxX, boxY, boxSize, boxSize);
+      ctx.strokeRect(boxX, boxY, boxSize, boxSize);
+      drawSkillIconGlyph(state.icon, boxX + boxSize / 2, boxY + boxSize / 2, boxSize);
+
+      if (!state.ready && state.totalMs > 0) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+        ctx.fillRect(boxX, boxY, boxSize, boxSize);
+        const secs = Math.ceil(state.remainingMs / 1000);
+        ctx.fillStyle = "#fff";
+        ctx.strokeStyle = COLORS.black;
+        ctx.lineWidth = 3;
+        ctx.font = "bold 22px Courier New, monospace";
+        ctx.textAlign = "center";
+        ctx.strokeText(String(secs), boxX + boxSize / 2, boxY + boxSize / 2 + 8);
+        ctx.fillText(String(secs), boxX + boxSize / 2, boxY + boxSize / 2 + 8);
+      }
+      ctx.restore();
     }
 
     function drawHpBar() {
@@ -1883,12 +2217,17 @@
       if (ball.ironMiningActive) {
         ctx.textAlign = "center";
         ctx.font = "bold 28px Courier New, monospace";
-        drawOutlinedText("IRON MINING!", x + barW / 2, barY + barH + 64, COLORS.ironMining, COLORS.black, 4);
+        drawOutlinedText("IRON MINING!", x + barW / 2, barY + barH + 102, COLORS.ironMining, COLORS.black, 4);
       } else if (ball.scissorActive) {
         ctx.textAlign = "center";
         ctx.font = "bold 28px Courier New, monospace";
-        drawOutlinedText("SCISSOR FRENZY!", x + barW / 2, barY + barH + 64, "#e74c3c", COLORS.black, 4);
+        drawOutlinedText("SCISSOR FRENZY!", x + barW / 2, barY + barH + 102, "#e74c3c", COLORS.black, 4);
       }
+
+      const iconSize = 36;
+      const iconY = barY + barH + 56;
+      const iconX = isLeft ? x : x + barW - iconSize;
+      drawAbilityCooldownIcon(ball, iconX, iconY, iconSize, isLeft);
     }
 
     function drawDamageNumbers(dt) {
@@ -2092,6 +2431,7 @@
         updateLightning(dt);
         updateArrows(dt);
         updateBleed(dt);
+        updateExcaliburDrops(dt);
       }
 
       const shake = getShakeOffset();
@@ -2107,6 +2447,8 @@
       }
 
       drawLightningBolts();
+      drawExcaliburDrops();
+      drawHolyShockwaves(dt);
       drawArrows();
       drawElectricEffects(dt);
       drawChompEffects(dt);
