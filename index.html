@@ -188,8 +188,8 @@
       archerMeleeEnterPad: 32,
       archerMeleeExitPad: 56,
       archerModeFlashMs: 400,
-      paladinInterval: 10000,
-      paladinDropDamage: 30,
+      paladinInterval: 12000,
+      paladinDropDamage: 20,
       paladinTelegraphMs: 380,
       paladinFallSpeed: 1680,
       paladinKnockback: 720,
@@ -220,7 +220,7 @@
       lancerThrustDuration: 320,
       lancerThrustDamage: 9,
       lancerThrustKnockback: 280,
-      lancerThrustRange: 102
+      lancerThrustRange: 204
     };
 
     // ===== EDIT CHARACTERS HERE ONLY =====
@@ -314,11 +314,11 @@
         id: "paladin",
         name: "Paladin",
         teamColor: "#f5f5f5",
-        hp: 65,
+        hp: 60,
         baseDamage: 6,
-        abilityDamage: 30,
+        abilityDamage: 20,
         abilityName: "EXCALIBUR",
-        abilityCooldown: 10000,
+        abilityCooldown: 12000,
         abilityType: "paladin",
         ballColor: "#ecf0f1",
         weaponType: "excalibur",
@@ -1177,7 +1177,7 @@
       const sy = lancer.y + Math.sin(angle) * start;
       const ex = lancer.x + Math.cos(angle) * end;
       const ey = lancer.y + Math.sin(angle) * end;
-      if (pointToSegmentDist(opponent.x, opponent.y, sx, sy, ex, ey) > opponent.radius + 8) return;
+      if (pointToSegmentDist(opponent.x, opponent.y, sx, sy, ex, ey) > opponent.radius + 12) return;
       lancer.thrustHit = true;
       applyDamage(opponent, lancer, ABILITY.lancerThrustDamage);
       const dx = opponent.x - lancer.x;
@@ -2387,32 +2387,46 @@
         const ex = this.x + Math.cos(angle) * end;
         const ey = this.y + Math.sin(angle) * end;
         ctx.save();
-        ctx.strokeStyle = "#5c3a1e";
-        ctx.lineWidth = 4;
+        ctx.globalAlpha = 0.35 * (1 - progress * 0.4);
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 8;
         ctx.lineCap = "round";
         ctx.beginPath();
         ctx.moveTo(sx, sy);
         ctx.lineTo(ex, ey);
         ctx.stroke();
+        ctx.strokeStyle = "#5c3a1e";
+        ctx.lineWidth = 7;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
         ctx.strokeStyle = "#ecf0f1";
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.moveTo(sx, sy);
         ctx.lineTo(ex, ey);
         ctx.stroke();
         ctx.fillStyle = "#bdc3c7";
+        ctx.strokeStyle = "#95a5a6";
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(ex, ey);
-        ctx.lineTo(ex + Math.cos(angle + 2.5) * 10, ey + Math.sin(angle + 2.5) * 10);
-        ctx.lineTo(ex + Math.cos(angle - 2.5) * 10, ey + Math.sin(angle - 2.5) * 10);
+        ctx.lineTo(ex + Math.cos(angle + 2.4) * 16, ey + Math.sin(angle + 2.4) * 16);
+        ctx.lineTo(ex + Math.cos(angle - 2.4) * 16, ey + Math.sin(angle - 2.4) * 16);
         ctx.closePath();
         ctx.fill();
-        ctx.globalAlpha = 0.45 * (1 - progress * 0.5);
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = "#ffd700";
         ctx.beginPath();
-        ctx.moveTo(sx, sy);
-        ctx.lineTo(ex, ey);
+        ctx.arc(ex, ey, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.55 * (1 - progress * 0.35);
+        ctx.strokeStyle = "#f1c40f";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(ex - Math.cos(angle) * 10, ey - Math.sin(angle) * 10);
+        ctx.lineTo(ex + Math.cos(angle) * 14, ey + Math.sin(angle) * 14);
         ctx.stroke();
         ctx.restore();
       }
