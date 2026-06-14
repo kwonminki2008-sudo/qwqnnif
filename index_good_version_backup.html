@@ -38,7 +38,30 @@
     }
 
     #restartBtn {
-      display: none !important;
+      position: absolute;
+      bottom: 120px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 20px 56px;
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 32px;
+      font-weight: bold;
+      color: #fff;
+      background: #222;
+      border: 3px solid #fff;
+      cursor: pointer;
+      z-index: 10;
+      letter-spacing: 2px;
+      display: none;
+    }
+
+    #restartBtn:hover {
+      background: #444;
+    }
+
+    #restartBtn:active {
+      background: #666;
+      transform: translateX(-50%) scale(0.97);
     }
   </style>
 </head>
@@ -52,6 +75,7 @@
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
     ctx.imageSmoothingEnabled = true;
+    const restartBtn = document.getElementById("restartBtn");
 
     const W = 1080;
     const H = 1920;
@@ -207,10 +231,6 @@
       screenShake.duration = Math.max(screenShake.duration, duration);
     }
 
-    function getDisplayedDamage(ball) {
-      return Math.round(ball.baseDamage * ball.damageMultiplier);
-    }
-
     function spawnDamageNumber(victim, attacker, amount) {
       const dx = attacker.x - victim.x;
       const dy = attacker.y - victim.y;
@@ -226,6 +246,10 @@
         life: 1400,
         scale: 1.15
       });
+    }
+
+    function updateRestartButton() {
+      restartBtn.style.display = gameOver ? "block" : "none";
     }
 
     function spawnTextEffect(x, y, text, color, size = 48) {
@@ -303,6 +327,7 @@
           if (!gameOver && target.hp <= 0) {
             gameOver = true;
             winner = bolt.fromBall.id;
+            updateRestartButton();
           }
           continue;
         }
@@ -345,7 +370,10 @@
       for (const bolt of lightningBolts) {
         if (!bolt.active) continue;
         ctx.save();
+        ctx.shadowColor = COLORS.green;
+        ctx.shadowBlur = 12;
         drawZigzagBolt(bolt.fromBall.x, bolt.fromBall.y, bolt.x, bolt.y);
+        ctx.shadowBlur = 0;
         ctx.beginPath();
         ctx.arc(bolt.x, bolt.y, 7, 0, Math.PI * 2);
         ctx.fillStyle = "#00eaff";
@@ -458,22 +486,22 @@
       }
 
       update(dt) {
-        if (this.awakenedEyeTimeLeft > 0) {
-          this.awakenedEyeTimeLeft -= dt * 1000;
-        }
-
         if (gameOver) return;
 
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.trail.push({ x: this.x, y: this.y });
-        if (this.trail.length > 8) this.trail.shift();
+        if (this.trail.length > 14) this.trail.shift();
         this.bounceOffWalls();
 
         const targetAngle = Math.atan2(this.vy, this.vx);
         const smoothFactor = clamp(dt * 5.5, 0, 0.07);
         this.weaponAngle = lerpAngle(this.weaponAngle, targetAngle, smoothFactor);
         this.glowPhase += dt * 4;
+
+        if (this.awakenedEyeTimeLeft > 0) {
+          this.awakenedEyeTimeLeft -= dt * 1000;
+        }
 
         if (this.collisionCooldown > 0) {
           this.collisionCooldown -= dt * 1000;
@@ -501,17 +529,16 @@
       }
 
       drawTrail() {
-        ctx.save();
-        for (let i = 0; i < this.trail.length - 1; i++) {
+        for (let i = 0; i < this.trail.length; i++) {
           const t = this.trail[i];
           const p = (i + 1) / this.trail.length;
           ctx.beginPath();
-          ctx.arc(t.x, t.y, this.radius * (0.08 + p * 0.06), 0, Math.PI * 2);
+          ctx.arc(t.x, t.y, this.radius * (0.35 + p * 0.45), 0, Math.PI * 2);
           ctx.fillStyle = this.color;
-          ctx.globalAlpha = p * 0.1;
+          ctx.globalAlpha = p * 0.28;
           ctx.fill();
         }
-        ctx.restore();
+        ctx.globalAlpha = 1;
       }
 
       drawFace() {
@@ -520,9 +547,7 @@
         const lookX = clamp(this.vx / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
         const lookY = clamp(this.vy / PHYSICS.maxSpeed, -1, 1) * this.radius * 0.08;
 
-        const awakened = this.id === "green" && this.awakenedEyeTimeLeft > 0;
-        const eyeColor = awakened ? "#fff200" : "#fff";
-        const pupilColor = awakened ? "#332200" : "#111";
+        const eyeColor = this.id === "green" && this.awakenedEyeTimeLeft > 0 ? COLORS.ironMining : "#fff";
 
         ctx.fillStyle = eyeColor;
         ctx.beginPath();
@@ -530,7 +555,7 @@
         ctx.arc(this.x + eyeOffset + lookX, this.y - eyeOffset * 0.5 + lookY, eyeR, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = pupilColor;
+        ctx.fillStyle = "#111";
         ctx.beginPath();
         ctx.arc(this.x - eyeOffset + lookX * 1.3, this.y - eyeOffset * 0.5 + lookY * 1.3, eyeR * 0.55, 0, Math.PI * 2);
         ctx.arc(this.x + eyeOffset + lookX * 1.3, this.y - eyeOffset * 0.5 + lookY * 1.3, eyeR * 0.55, 0, Math.PI * 2);
@@ -764,6 +789,7 @@
             } else {
               winner = b.name === "green" ? "blue" : "green";
             }
+            updateRestartButton();
           }
       }
     }
@@ -779,6 +805,7 @@
       screenShake.intensity = 0;
       screenShake.duration = 0;
       createBalls();
+      updateRestartButton();
     }
 
     function drawArena() {
@@ -869,24 +896,14 @@
       ctx.lineWidth = 4;
       ctx.strokeRect(x, barY, barW, barH);
 
-      ctx.textAlign = isLeft ? "left" : "right";
-      ctx.font = "bold 28px Courier New, monospace";
-      ctx.fillStyle = "#cccccc";
-      ctx.strokeStyle = COLORS.black;
-      ctx.lineWidth = 3;
-      const dmgX = isLeft ? x : x + barW;
-      const dmgLabel = "DMG: " + getDisplayedDamage(ball);
-      ctx.strokeText(dmgLabel, dmgX, barY + barH + 34);
-      ctx.fillText(dmgLabel, dmgX, barY + barH + 34);
-
       if (ball.ironMiningActive) {
         ctx.textAlign = "center";
         ctx.font = "bold 30px Courier New, monospace";
         ctx.fillStyle = COLORS.ironMining;
         ctx.strokeStyle = COLORS.black;
         ctx.lineWidth = 5;
-        ctx.strokeText("IRON MINING!", x + barW / 2, barY + barH + 72);
-        ctx.fillText("IRON MINING!", x + barW / 2, barY + barH + 72);
+        ctx.strokeText("IRON MINING!", x + barW / 2, barY + barH + 38);
+        ctx.fillText("IRON MINING!", x + barW / 2, barY + barH + 38);
       }
     }
 
@@ -1046,10 +1063,8 @@
       requestAnimationFrame(loop);
     }
 
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "r" || e.key === "R") {
-        initGame();
-      }
+    restartBtn.addEventListener("click", () => {
+      initGame();
     });
 
     initGame();
