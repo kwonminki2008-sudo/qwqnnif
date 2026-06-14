@@ -38,16 +38,44 @@
       image-rendering: pixelated;
       image-rendering: crisp-edges;
     }
+
+    #restartBtn {
+      position: absolute;
+      bottom: 48px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 18px 48px;
+      font-family: "Courier New", Courier, monospace;
+      font-size: 28px;
+      font-weight: bold;
+      color: #fff;
+      background: #222;
+      border: 3px solid #fff;
+      cursor: pointer;
+      z-index: 10;
+      letter-spacing: 2px;
+    }
+
+    #restartBtn:hover {
+      background: #444;
+    }
+
+    #restartBtn:active {
+      background: #666;
+      transform: translateX(-50%) scale(0.97);
+    }
   </style>
 </head>
 <body>
   <div id="wrapper">
     <canvas id="canvas" width="1080" height="1920"></canvas>
+    <button id="restartBtn" type="button">RESTART (R)</button>
   </div>
 
   <script>
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
+    const restartBtn = document.getElementById("restartBtn");
 
     const W = 1080;
     const H = 1920;
@@ -72,17 +100,35 @@
       hpBlue: "#0074d9"
     };
 
+    const PHYSICS = {
+      minSpeed: 340,
+      maxSpeed: 620,
+      wallRestitution: 1.22,
+      ballRestitution: 1.38,
+      knockbackForce: 420,
+      separationPadding: 4,
+      angleJitter: 0.14,
+      wallAngleJitter: 0.08,
+      hitCooldownMs: 580
+    };
+
     const ABILITY = {
       ironMiningInterval: 5000,
       ironMiningDuration: 3000,
-      ironMiningDamageMultiplier: 2.8
+      ironMiningDamageMultiplier: 2.6
     };
 
-    const damageNumbers = [];
-    const textEffects = [];
+    let damageNumbers = [];
+    let textEffects = [];
+    let impactFlashes = [];
     let gameOver = false;
     let winner = null;
     let lastTime = 0;
+    let greenBall;
+    let blueBall;
+    let balls = [];
+
+    const screenShake = { intensity: 0, duration: 0 };
 
     function clamp(v, min, max) {
       return Math.max(min, Math.min(max, v));
@@ -92,14 +138,50 @@
       return min + Math.random() * (max - min);
     }
 
+    function getMass(ball) {
+      return ball.radius * ball.radius;
+    }
+
+    function enforceSpeedLimits(ball) {
+      let speed = Math.hypot(ball.vx, ball.vy);
+      if (speed < PHYSICS.minSpeed) {
+        if (speed < 1) {
+          const angle = rand(0, Math.PI * 2);
+          ball.vx = Math.cos(angle) * PHYSICS.minSpeed;
+          ball.vy = Math.sin(angle) * PHYSICS.minSpeed;
+        } else {
+          const scale = PHYSICS.minSpeed / speed;
+          ball.vx *= scale;
+          ball.vy *= scale;
+        }
+      } else if (speed > PHYSICS.maxSpeed) {
+        const scale = PHYSICS.maxSpeed / speed;
+        ball.vx *= scale;
+        ball.vy *= scale;
+      }
+    }
+
+    function preserveSpeedWithJitter(ball, preSpeed) {
+      let speed = Math.max(preSpeed, PHYSICS.minSpeed);
+      speed = Math.min(speed, PHYSICS.maxSpeed);
+      let angle = Math.atan2(ball.vy, ball.vx) + rand(-PHYSICS.angleJitter, PHYSICS.angleJitter);
+      ball.vx = Math.cos(angle) * speed;
+      ball.vy = Math.sin(angle) * speed;
+    }
+
+    function triggerScreenShake(intensity, duration) {
+      screenShake.intensity = Math.max(screenShake.intensity, intensity);
+      screenShake.duration = Math.max(screenShake.duration, duration);
+    }
+
     function spawnDamageNumber(x, y, amount) {
       damageNumbers.push({
         x,
         y,
         text: String(Math.round(amount)),
         alpha: 1,
-        vy: -2.8,
-        life: 900
+        vy: -3.4,
+        life: 950
       });
     }
 
@@ -113,6 +195,16 @@
         alpha: 1,
         life: 1800,
         vy: -1.2
+      });
+    }
+
+    function spawnImpactFlash(x, y, radius) {
+      impactFlashes.push({
+        x,
+        y,
+        radius,
+        alpha: 0.85,
+        life: 180
       });
     }
 
@@ -144,36 +236,50 @@
         return 1;
       }
 
+      bounceOffWalls() {
+        const left = ARENA.x + this.radius;
+        const right = ARENA.x + ARENA.w - this.radius;
+        const top = ARENA.y + this.radius;
+        const bottom = ARENA.y + ARENA.h - this.radius;
+        const e = PHYSICS.wallRestitution;
+
+        if (this.x < left) {
+          this.x = left;
+          this.vx = Math.abs(this.vx) * e;
+          this.vy += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
+          triggerScreenShake(4, 80);
+        } else if (this.x > right) {
+          this.x = right;
+          this.vx = -Math.abs(this.vx) * e;
+          this.vy += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
+          triggerScreenShake(4, 80);
+        }
+
+        if (this.y < top) {
+          this.y = top;
+          this.vy = Math.abs(this.vy) * e;
+          this.vx += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
+          triggerScreenShake(4, 80);
+        } else if (this.y > bottom) {
+          this.y = bottom;
+          this.vy = -Math.abs(this.vy) * e;
+          this.vx += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(this.vx, this.vy);
+          triggerScreenShake(4, 80);
+        }
+
+        enforceSpeedLimits(this);
+      }
+
       update(dt) {
         if (gameOver) return;
 
         this.x += this.vx * dt;
         this.y += this.vy * dt;
-
-        const left = ARENA.x + this.radius;
-        const right = ARENA.x + ARENA.w - this.radius;
-        const top = ARENA.y + this.radius;
-        const bottom = ARENA.y + ARENA.h - this.radius;
-
-        if (this.x < left) {
-          this.x = left;
-          this.vx = Math.abs(this.vx);
-        } else if (this.x > right) {
-          this.x = right;
-          this.vx = -Math.abs(this.vx);
-        }
-
-        if (this.y < top) {
-          this.y = top;
-          this.vy = Math.abs(this.vy);
-        } else if (this.y > bottom) {
-          this.y = bottom;
-          this.vy = -Math.abs(this.vy);
-        }
+        this.bounceOffWalls();
 
         const speed = Math.hypot(this.vx, this.vy);
         const targetAngle = Math.atan2(this.vy, this.vx);
-        this.weaponAngle += (targetAngle - this.weaponAngle) * 0.12;
+        this.weaponAngle += (targetAngle - this.weaponAngle) * 0.14;
         this.weaponWobble += dt * (8 + speed * 0.4);
 
         if (this.collisionCooldown > 0) {
@@ -230,7 +336,6 @@
         }
 
         this.drawWeapon();
-
         ctx.restore();
       }
 
@@ -298,93 +403,149 @@
       ctx.restore();
     }
 
-    const greenBall = new Ball({
-      name: "green",
-      color: COLORS.green,
-      colorDark: COLORS.greenDark,
-      x: ARENA.x + ARENA.w * 0.35,
-      y: ARENA.y + ARENA.h * 0.4,
-      vx: 280,
-      vy: 220,
-      radius: 58,
-      hp: 41,
-      weapon: "pickaxe",
-      ability: "ironMining",
-      baseDamage: 9
-    });
+    function createBalls() {
+      greenBall = new Ball({
+        name: "green",
+        color: COLORS.green,
+        colorDark: COLORS.greenDark,
+        x: ARENA.x + ARENA.w * 0.35,
+        y: ARENA.y + ARENA.h * 0.4,
+        vx: 380,
+        vy: 300,
+        radius: 58,
+        hp: 41,
+        weapon: "pickaxe",
+        ability: "ironMining",
+        baseDamage: 5.2
+      });
 
-    const blueBall = new Ball({
-      name: "blue",
-      color: COLORS.blue,
-      colorDark: COLORS.blueDark,
-      x: ARENA.x + ARENA.w * 0.65,
-      y: ARENA.y + ARENA.h * 0.6,
-      vx: -260,
-      vy: -240,
-      radius: 72,
-      hp: 95,
-      weapon: "stick",
-      ability: "normal",
-      baseDamage: 7
-    });
+      blueBall = new Ball({
+        name: "blue",
+        color: COLORS.blue,
+        colorDark: COLORS.blueDark,
+        x: ARENA.x + ARENA.w * 0.65,
+        y: ARENA.y + ARENA.h * 0.6,
+        vx: -360,
+        vy: -320,
+        radius: 72,
+        hp: 95,
+        weapon: "stick",
+        ability: "normal",
+        baseDamage: 3.8
+      });
 
-    const balls = [greenBall, blueBall];
+      balls = [greenBall, blueBall];
+    }
+
+    function separateBalls(a, b, nx, ny, overlap) {
+      const massA = getMass(a);
+      const massB = getMass(b);
+      const totalMass = massA + massB;
+      const extra = PHYSICS.separationPadding;
+
+      a.x -= nx * overlap * (massB / totalMass) - nx * extra * 0.5;
+      a.y -= ny * overlap * (massB / totalMass) - ny * extra * 0.5;
+      b.x += nx * overlap * (massA / totalMass) + nx * extra * 0.5;
+      b.y += ny * overlap * (massA / totalMass) + ny * extra * 0.5;
+    }
 
     function resolveBallCollision(a, b) {
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.hypot(dx, dy);
+      let dx = b.x - a.x;
+      let dy = b.y - a.y;
+      let dist = Math.hypot(dx, dy);
       const minDist = a.radius + b.radius;
 
-      if (dist >= minDist || dist === 0) return;
+      if (dist === 0) {
+        const angle = rand(0, Math.PI * 2);
+        dx = Math.cos(angle);
+        dy = Math.sin(angle);
+        dist = 1;
+      }
+
+      if (dist >= minDist) return;
 
       const nx = dx / dist;
       const ny = dy / dist;
-
       const overlap = minDist - dist;
-      a.x -= nx * overlap * 0.5;
-      a.y -= ny * overlap * 0.5;
-      b.x += nx * overlap * 0.5;
-      b.y += ny * overlap * 0.5;
 
-      const dvx = a.vx - b.vx;
-      const dvy = a.vy - b.vy;
-      const impactSpeed = Math.abs(dvx * nx + dvy * ny);
+      separateBalls(a, b, nx, ny, overlap);
 
-      if (impactSpeed < 1) return;
+      const massA = getMass(a);
+      const massB = getMass(b);
+      const invMassA = 1 / massA;
+      const invMassB = 1 / massB;
 
-      const restitution = 0.92;
-      const impulse = (2 * impactSpeed) / (1 / a.radius + 1 / b.radius) * restitution * 0.015;
+      let velAlongNormal = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
 
-      a.vx -= impulse * nx / a.radius;
-      a.vy -= impulse * ny / a.radius;
-      b.vx += impulse * nx / b.radius;
-      b.vy += impulse * ny / b.radius;
+      if (velAlongNormal >= 0) {
+        velAlongNormal = -Math.max(PHYSICS.minSpeed * 0.35, 80);
+      }
+
+      const speedA = Math.hypot(a.vx, a.vy);
+      const speedB = Math.hypot(b.vx, b.vy);
+      const e = PHYSICS.ballRestitution;
+
+      const impulseMag = -(1 + e) * velAlongNormal / (invMassA + invMassB);
+
+      a.vx += impulseMag * invMassA * nx;
+      a.vy += impulseMag * invMassA * ny;
+      b.vx -= impulseMag * invMassB * nx;
+      b.vy -= impulseMag * invMassB * ny;
+
+      const knockback = PHYSICS.knockbackForce;
+      a.vx -= nx * knockback;
+      a.vy -= ny * knockback;
+      b.vx += nx * knockback;
+      b.vy += ny * knockback;
+
+      preserveSpeedWithJitter(a, speedA);
+      preserveSpeedWithJitter(b, speedB);
+      enforceSpeedLimits(a);
+      enforceSpeedLimits(b);
+
+      const midX = (a.x + b.x) / 2;
+      const midY = (a.y + b.y) / 2;
 
       if (a.collisionCooldown <= 0 && b.collisionCooldown <= 0) {
-        const relSpeed = Math.hypot(a.vx - b.vx, a.vy - b.vy);
-        const speedBonus = clamp(relSpeed * 0.035, 0, 18);
+          const relSpeed = Math.hypot(a.vx - b.vx, a.vy - b.vy);
+          const speedBonus = clamp(relSpeed * 0.008, 0, 4);
 
-        const damageToB = a.baseDamage * a.damageMultiplier + speedBonus;
-        const damageToA = b.baseDamage * b.damageMultiplier + speedBonus;
+          const damageToB = a.baseDamage * a.damageMultiplier + speedBonus;
+          const damageToA = b.baseDamage * b.damageMultiplier + speedBonus;
 
-        b.hp -= damageToB;
-        a.hp -= damageToA;
+          b.hp -= damageToB;
+          a.hp -= damageToA;
 
-        const midX = (a.x + b.x) / 2;
-        const midY = (a.y + b.y) / 2;
+          spawnDamageNumber(midX - 36, midY - 24, damageToB);
+          spawnDamageNumber(midX + 36, midY - 24, damageToA);
+          spawnImpactFlash(midX, midY, minDist * 0.55);
+          triggerScreenShake(14, 220);
 
-        spawnDamageNumber(midX - 30, midY - 20, damageToB);
-        spawnDamageNumber(midX + 30, midY - 20, damageToA);
+          a.collisionCooldown = PHYSICS.hitCooldownMs;
+          b.collisionCooldown = PHYSICS.hitCooldownMs;
 
-        a.collisionCooldown = 280;
-        b.collisionCooldown = 280;
-
-        if (a.hp <= 0 || b.hp <= 0) {
-          gameOver = true;
-          winner = a.hp <= 0 ? (a.name === "green" ? "blue" : "green") : (b.name === "green" ? "blue" : "green");
-        }
+          if (a.hp <= 0 || b.hp <= 0) {
+            gameOver = true;
+            if (a.hp <= 0 && b.hp <= 0) {
+              winner = a.maxHp <= b.maxHp ? "green" : "blue";
+            } else if (a.hp <= 0) {
+              winner = a.name === "green" ? "blue" : "green";
+            } else {
+              winner = b.name === "green" ? "blue" : "green";
+            }
+          }
       }
+    }
+
+    function initGame() {
+      damageNumbers = [];
+      textEffects = [];
+      impactFlashes = [];
+      gameOver = false;
+      winner = null;
+      screenShake.intensity = 0;
+      screenShake.duration = 0;
+      createBalls();
     }
 
     function drawArena() {
@@ -462,7 +623,7 @@
         const d = damageNumbers[i];
         d.life -= dt * 1000;
         d.y += d.vy;
-        d.alpha = clamp(d.life / 900, 0, 1);
+        d.alpha = clamp(d.life / 950, 0, 1);
 
         ctx.save();
         ctx.globalAlpha = d.alpha;
@@ -501,6 +662,25 @@
       }
     }
 
+    function drawImpactFlashes(dt) {
+      for (let i = impactFlashes.length - 1; i >= 0; i--) {
+        const f = impactFlashes[i];
+        f.life -= dt * 1000;
+        f.alpha = clamp(f.life / 180, 0, 1) * 0.85;
+        f.radius += dt * 120;
+
+        ctx.save();
+        ctx.globalAlpha = f.alpha;
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+        ctx.restore();
+
+        if (f.life <= 0) impactFlashes.splice(i, 1);
+      }
+    }
+
     function drawWinScreen() {
       if (!gameOver || !winner) return;
 
@@ -518,18 +698,45 @@
       ctx.fillStyle = winColor;
       ctx.fillText(winText, W / 2, H / 2);
 
-      ctx.font = "32px Courier New, monospace";
+      ctx.font = "28px Courier New, monospace";
       ctx.fillStyle = COLORS.white;
-      ctx.fillText("Refresh to replay", W / 2, H / 2 + 70);
+      ctx.fillText("Press R or RESTART to play again", W / 2, H / 2 + 70);
+    }
+
+    function updateScreenShake(dt) {
+      if (screenShake.duration > 0) {
+        screenShake.duration -= dt * 1000;
+        if (screenShake.duration <= 0) {
+          screenShake.intensity = 0;
+          screenShake.duration = 0;
+        }
+      }
+    }
+
+    function getShakeOffset() {
+      if (screenShake.duration <= 0) return { x: 0, y: 0 };
+      const t = screenShake.duration / 220;
+      const mag = screenShake.intensity * t;
+      return {
+        x: rand(-mag, mag),
+        y: rand(-mag, mag)
+      };
     }
 
     function update(dt) {
+      updateScreenShake(dt);
+
       if (!gameOver) {
         for (const ball of balls) {
           ball.update(dt);
         }
         resolveBallCollision(greenBall, blueBall);
       }
+
+      const shake = getShakeOffset();
+
+      ctx.save();
+      ctx.translate(shake.x, shake.y);
 
       drawArena();
       drawHeader();
@@ -538,10 +745,13 @@
         ball.draw();
       }
 
+      drawImpactFlashes(dt);
       drawDamageNumbers(dt);
       drawTextEffects(dt);
       drawHpBar();
       drawWinScreen();
+
+      ctx.restore();
     }
 
     function loop(timestamp) {
@@ -553,6 +763,17 @@
       requestAnimationFrame(loop);
     }
 
+    restartBtn.addEventListener("click", () => {
+      initGame();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "r" || e.key === "R") {
+        initGame();
+      }
+    });
+
+    initGame();
     requestAnimationFrame(loop);
   </script>
 </body>
