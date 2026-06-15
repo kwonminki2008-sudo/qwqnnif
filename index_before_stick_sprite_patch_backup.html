@@ -236,221 +236,6 @@
       vampireTeleportSafetyMs: 150
     };
 
-    const STICK_SPRITE = {
-      basePath: "assets/stick/",
-      displayHeight: 150,
-      walkFrameMs: 130,
-      attackSwingMs: 280,
-      attackReadyPad: 36,
-      moveThreshold: 90,
-      hitboxHalfW: 30,
-      hitboxHalfH: 52,
-      feetDropRatio: 0.35,
-      frameNames: ["idle", "walk_1", "walk_2", "walk_3", "walk_4", "attack_ready", "attack_swing", "dead"]
-    };
-
-    const stickSpriteImages = {};
-    let stickSpritesPreloadStarted = false;
-
-    function isStickBall(ball) {
-      return ball && ball.id === "blue";
-    }
-
-    function preloadStickSprites() {
-      if (stickSpritesPreloadStarted) return;
-      stickSpritesPreloadStarted = true;
-      for (const name of STICK_SPRITE.frameNames) {
-        const img = new Image();
-        img.onerror = () => console.warn("[Stick] sprite missing:", name + ".png");
-        img.src = STICK_SPRITE.basePath + name + ".png";
-        stickSpriteImages[name] = img;
-      }
-    }
-
-    function getStickSpriteImage(name) {
-      const img = stickSpriteImages[name];
-      if (img && img.complete && img.naturalWidth > 0) return img;
-      const idle = stickSpriteImages.idle;
-      if (name !== "idle" && idle && idle.complete && idle.naturalWidth > 0) return idle;
-      if (idle && idle.complete && idle.naturalWidth > 0) return idle;
-      return null;
-    }
-
-    function getStickHitbox(ball) {
-      const halfW = STICK_SPRITE.hitboxHalfW;
-      const halfH = STICK_SPRITE.hitboxHalfH;
-      const feetY = ball.y + ball.radius * STICK_SPRITE.feetDropRatio;
-      const cy = feetY - halfH;
-      return { cx: ball.x, cy, halfW, halfH, feetY };
-    }
-
-    function getBallReachRadius(ball) {
-      if (isStickBall(ball)) {
-        return STICK_SPRITE.hitboxHalfW + STICK_SPRITE.hitboxHalfH * 0.42;
-      }
-      return ball.radius;
-    }
-
-    function getBallCollisionInfo(ball) {
-      if (isStickBall(ball)) {
-        const hb = getStickHitbox(ball);
-        return { type: "capsule", ball, cx: hb.cx, cy: hb.cy, halfW: hb.halfW, halfH: hb.halfH, feetY: hb.feetY };
-      }
-      return { type: "circle", ball, cx: ball.x, cy: ball.y, r: ball.radius };
-    }
-
-    function collideCapsuleCircle(cap, circ) {
-      const clampedY = clamp(circ.cy, cap.cy - cap.halfH, cap.cy + cap.halfH);
-      const dx = circ.cx - cap.cx;
-      const dy = circ.cy - clampedY;
-      const dist = Math.hypot(dx, dy) || 0.001;
-      const minDist = cap.halfW + circ.r;
-      if (dist >= minDist) return null;
-      return {
-        nx: dx / dist,
-        ny: dy / dist,
-        overlap: minDist - dist,
-        dist,
-        minDist
-      };
-    }
-
-    function getCollisionBetween(a, b) {
-      const ia = getBallCollisionInfo(a);
-      const ib = getBallCollisionInfo(b);
-
-      if (ia.type === "circle" && ib.type === "circle") {
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist === 0) {
-          const angle = rand(0, Math.PI * 2);
-          return { nx: Math.cos(angle), ny: Math.sin(angle), overlap: a.radius + b.radius, dist: 0, minDist: a.radius + b.radius };
-        }
-        const minDist = a.radius + b.radius;
-        if (dist >= minDist) return null;
-        return { nx: dx / dist, ny: dy / dist, overlap: minDist - dist, dist, minDist };
-      }
-
-      if (ia.type === "capsule" && ib.type === "circle") {
-        return collideCapsuleCircle(ia, ib);
-      }
-
-      if (ia.type === "circle" && ib.type === "capsule") {
-        const hit = collideCapsuleCircle(ib, ia);
-        if (!hit) return null;
-        return { nx: -hit.nx, ny: -hit.ny, overlap: hit.overlap, dist: hit.dist, minDist: hit.minDist };
-      }
-
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.hypot(dx, dy) || 0.001;
-      const minDist = getBallReachRadius(a) + getBallReachRadius(b);
-      if (dist >= minDist) return null;
-      return { nx: dx / dist, ny: dy / dist, overlap: minDist - dist, dist, minDist };
-    }
-
-    function bounceStickOffWalls(ball) {
-      const hb = getStickHitbox(ball);
-      const e = PHYSICS.wallRestitution;
-      const left = ARENA.x + hb.halfW;
-      const right = ARENA.x + ARENA.w - hb.halfW;
-      const feetDrop = ball.radius * STICK_SPRITE.feetDropRatio;
-      const minBallY = ARENA.y - feetDrop + hb.halfH * 2 + hb.halfW;
-      const maxBallY = ARENA.y + ARENA.h - feetDrop;
-
-      if (ball.x < left) {
-        ball.x = left;
-        ball.vx = Math.abs(ball.vx) * e;
-        ball.vy += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(ball.vx, ball.vy);
-        triggerScreenShake(4, 80);
-      } else if (ball.x > right) {
-        ball.x = right;
-        ball.vx = -Math.abs(ball.vx) * e;
-        ball.vy += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(ball.vx, ball.vy);
-        triggerScreenShake(4, 80);
-      }
-
-      if (ball.y < minBallY) {
-        ball.y = minBallY;
-        ball.vy = Math.abs(ball.vy) * e;
-        ball.vx += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(ball.vx, ball.vy);
-        triggerScreenShake(4, 80);
-      } else if (ball.y > maxBallY) {
-        ball.y = maxBallY;
-        ball.vy = -Math.abs(ball.vy) * e;
-        ball.vx += rand(-PHYSICS.wallAngleJitter, PHYSICS.wallAngleJitter) * Math.hypot(ball.vx, ball.vy);
-        triggerScreenShake(4, 80);
-      }
-
-      enforceSpeedLimits(ball);
-    }
-
-    function isStickStatusStopped(ball) {
-      return ball.paralyzedTimeLeft > 0;
-    }
-
-    function getStickSpriteKey(ball, opponent) {
-      if (ball.hp <= 0) return "dead";
-      if (isStickStatusStopped(ball)) return "idle";
-
-      if (ball.stickAttackSwingTime > 0) return "attack_swing";
-
-      if (opponent && opponent.hp > 0) {
-        const dist = Math.hypot(opponent.x - ball.x, opponent.y - ball.y);
-        const reach = getBallReachRadius(ball) + getBallReachRadius(opponent) + STICK_SPRITE.attackReadyPad;
-        if (dist <= reach) return "attack_ready";
-      }
-
-      const speed = Math.hypot(ball.vx, ball.vy);
-      if (speed > STICK_SPRITE.moveThreshold) {
-        const frame = Math.floor(ball.stickWalkPhase / STICK_SPRITE.walkFrameMs) % 4 + 1;
-        return "walk_" + frame;
-      }
-
-      return "idle";
-    }
-
-    function getStickFacingLeft(ball, opponent, spriteKey) {
-      if ((spriteKey === "attack_ready" || spriteKey === "attack_swing") && opponent) {
-        return opponent.x < ball.x;
-      }
-      if (Math.abs(ball.vx) > 50) return ball.vx < 0;
-      if (opponent) return opponent.x < ball.x;
-      return ball.stickFacingLeft;
-    }
-
-    function drawStickSprite(ball, opponent) {
-      const spriteKey = getStickSpriteKey(ball, opponent);
-      const img = getStickSpriteImage(spriteKey);
-      if (!img) return false;
-
-      const targetH = STICK_SPRITE.displayHeight;
-      const scale = targetH / img.naturalHeight;
-      const drawW = img.naturalWidth * scale;
-      const drawH = targetH;
-      const feetY = ball.y + ball.radius * STICK_SPRITE.feetDropRatio;
-      const drawY = feetY - drawH;
-      const facingLeft = getStickFacingLeft(ball, opponent, spriteKey);
-      ball.stickFacingLeft = facingLeft;
-
-      ctx.save();
-      if (facingLeft) {
-        ctx.translate(ball.x, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(img, -drawW / 2, drawY, drawW, drawH);
-      } else {
-        ctx.drawImage(img, ball.x - drawW / 2, drawY, drawW, drawH);
-      }
-      ctx.restore();
-      return true;
-    }
-
-    function triggerStickAttackSwing(ball) {
-      if (!isStickBall(ball)) return;
-      ball.stickAttackSwingTime = STICK_SPRITE.attackSwingMs;
-    }
-
     // ===== EDIT CHARACTERS HERE ONLY =====
     const CHARACTERS = [
       {
@@ -2541,9 +2326,6 @@
         this.savedVy = 0;
         this.frozenX = config.x;
         this.frozenY = config.y;
-        this.stickWalkPhase = 0;
-        this.stickAttackSwingTime = 0;
-        this.stickFacingLeft = false;
       }
 
       get damageMultiplier() {
@@ -2558,11 +2340,6 @@
       }
 
       bounceOffWalls() {
-        if (isStickBall(this)) {
-          bounceStickOffWalls(this);
-          return;
-        }
-
         const left = ARENA.x + this.radius;
         const right = ARENA.x + ARENA.w - this.radius;
         const top = ARENA.y + this.radius;
@@ -2673,14 +2450,6 @@
 
         if (this.collisionCooldown > 0) {
           this.collisionCooldown -= dt * 1000;
-        }
-
-        if (isStickBall(this)) {
-          this.stickWalkPhase += dt * 1000;
-          if (this.stickAttackSwingTime > 0) {
-            this.stickAttackSwingTime -= dt * 1000;
-            if (this.stickAttackSwingTime < 0) this.stickAttackSwingTime = 0;
-          }
         }
 
         if (this.ninjaWallBounceCooldown > 0) {
@@ -3280,33 +3049,28 @@
         this.drawFrostAura();
         this.drawVampireCape();
 
-        const opponent = balls.find((b) => b !== this);
-        const stickSpriteDrawn = isStickBall(this) && drawStickSprite(this, opponent);
-
-        if (!stickSpriteDrawn) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.ability === "paladin" ? "#ffd700" : "#111";
+        ctx.stroke();
+        if (this.ability === "paladin") {
+          ctx.strokeStyle = "rgba(189, 195, 199, 0.55)";
+          ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-          ctx.fillStyle = this.color;
-          ctx.fill();
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = this.ability === "paladin" ? "#ffd700" : "#111";
+          ctx.arc(this.x, this.y, this.radius - 5, 0, Math.PI * 2);
           ctx.stroke();
-          if (this.ability === "paladin") {
-            ctx.strokeStyle = "rgba(189, 195, 199, 0.55)";
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, this.radius - 5, 0, Math.PI * 2);
-            ctx.stroke();
-          }
-
-          this.drawNinjaHeadband();
-          this.drawFrostDetails();
-          this.drawBomberDetails();
-          this.drawFace();
-          this.drawVampireDetails();
-          this.drawPaladinHelmet();
-          this.drawLancerHelmet();
         }
+
+        this.drawNinjaHeadband();
+        this.drawFrostDetails();
+        this.drawBomberDetails();
+        this.drawFace();
+        this.drawVampireDetails();
+        this.drawPaladinHelmet();
+        this.drawLancerHelmet();
         if (this.shadowDashActive) {
           ctx.beginPath();
           ctx.arc(this.x, this.y, this.radius + 8 + Math.sin(this.glowPhase * 5) * 3, 0, Math.PI * 2);
@@ -3347,7 +3111,7 @@
         }
 
         this.drawScissorSlashFlash();
-        if (!stickSpriteDrawn && !(this.ability === "lancer" && this.thrustActive)) {
+        if (!(this.ability === "lancer" && this.thrustActive)) {
           this.drawWeapon();
         }
         ctx.restore();
@@ -3712,18 +3476,23 @@
     }
 
     function resolveBallCollision(a, b) {
-      const hit = getCollisionBetween(a, b);
-      if (!hit) return;
+      let dx = b.x - a.x;
+      let dy = b.y - a.y;
+      let dist = Math.hypot(dx, dy);
+      const minDist = a.radius + b.radius;
 
-      const nx = hit.nx;
-      const ny = hit.ny;
-      const overlap = hit.overlap;
-      const minDist = hit.minDist;
-
-      if (isStickBall(a) || isStickBall(b)) {
-        if (isStickBall(a)) triggerStickAttackSwing(a);
-        if (isStickBall(b)) triggerStickAttackSwing(b);
+      if (dist === 0) {
+        const angle = rand(0, Math.PI * 2);
+        dx = Math.cos(angle);
+        dy = Math.sin(angle);
+        dist = 1;
       }
+
+      if (dist >= minDist) return;
+
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const overlap = minDist - dist;
 
       if (isParalyzed(a) || isParalyzed(b)) {
         if (resolveParalyzedCollision(a, b, nx, ny, overlap)) return;
@@ -3792,7 +3561,6 @@
     }
 
     function initGame() {
-      preloadStickSprites();
       damageNumbers = [];
       textEffects = [];
       impactFlashes = [];
@@ -4506,7 +4274,6 @@
 
     populateCharacterSelects();
     loadStoredSelections();
-    preloadStickSprites();
     showCharacterSelect();
     requestAnimationFrame(loop);
   </script>
