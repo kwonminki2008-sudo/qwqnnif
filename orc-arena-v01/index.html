@@ -90,6 +90,7 @@
 
     // ─── Image loading with fallback flag ─────────────────────────────────
     const images = {};
+    const missingSprites = [];
     let imagesReady = false;
 
     function loadAllImages() {
@@ -102,16 +103,36 @@
 
       function done() {
         pending--;
-        if (pending <= 0) imagesReady = true;
+        if (pending <= 0) {
+          imagesReady = true;
+          if (missingSprites.length) {
+            console.warn('Missing sprites (' + missingSprites.length + '):', missingSprites);
+          } else {
+            console.log('All 19 sprites loaded from ' + SPRITE_PATH);
+          }
+        }
       }
 
       for (const name of allNames) {
         const img = new Image();
         img.onload  = done;
-        img.onerror = () => { img._failed = true; done(); };
+        img.onerror = () => { img._failed = true; missingSprites.push(name); done(); };
         img.src = SPRITE_PATH + name;
         images[name] = img;
       }
+    }
+
+    function drawMissingSpriteDebug() {
+      if (!missingSprites.length) return;
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(8, 8, 520, 18 + missingSprites.length * 14);
+      ctx.fillStyle = '#ff6b6b';
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('Missing sprites (' + missingSprites.length + '):', 14, 22);
+      missingSprites.forEach((name, i) => {
+        ctx.fillText(name, 14, 36 + i * 14);
+      });
     }
 
     function getImage(filename) {
@@ -364,6 +385,7 @@
       drawArena();
       orcA.draw();
       orcB.draw();
+      drawMissingSpriteDebug();
 
       // Winner text
       if (!orcA.alive || !orcB.alive) {
