@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orc Arena v01</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a2e;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      font-family: sans-serif;
+    }
+    canvas {
+      display: block;
+      border: 2px solid #444;
+      background: #2d4a3e;
+    }
+    #hint {
+      position: fixed;
+      bottom: 12px;
+      color: #888;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="1280" height="720"></canvas>
+  <div id="hint">Press R to restart</div>
+
+  <script>
+    // ─── Tunable constants (edit these) ───────────────────────────────────
+    const CANVAS_WIDTH  = 1280;
+    const CANVAS_HEIGHT = 720;
+
+    const SPRITE_WIDTH  = 96;
+    const SPRITE_HEIGHT = 96;
+    const HITBOX_RADIUS = 28;
+
+    const MOVE_SPEED         = 90;   // pixels per second
+    const KNOCKBACK_FORCE    = 180;
+    const DAMAGE             = 12;
+    const DAMAGE_COOLDOWN    = 0.6;  // seconds between body hits
+    const ATTACK_DISPLAY_TIME = 0.15; // seconds to show attack sprite
+
+    const MAX_HP        = 100;
+    const WALK_BOB_AMPLITUDE = 4;
+    const WALK_BOB_SPEED     = 10;
+    const CLOSE_RANGE        = 120;  // distance to switch to ready poses
+    // ──────────────────────────────────────────────────────────────────────
+
+    const canvas = document.getElementById('game');
+    const ctx    = canvas.getContext('2d');
+
+    // Sprite filenames grouped by facing
+    const SPRITE_NAMES = {
+      left: [
+        'orc_left_idle.png', 'orc_left_walk.png', 'orc_left_weapon_ready.png',
+        'orc_left_kick_ready.png', 'orc_left_attack_forward.png',
+        'orc_left_attack_up.png', 'orc_left_attack_diag_up.png',
+        'orc_left_kick_down.png', 'orc_left_kick_diag_down.png'
+      ],
+      right: [
+        'orc_right_idle.png', 'orc_right_walk.png', 'orc_right_weapon_ready.png',
+        'orc_right_kick_ready.png', 'orc_right_attack_forward.png',
+        'orc_right_attack_up.png', 'orc_right_attack_diag_up.png',
+        'orc_right_kick_down.png', 'orc_right_kick_diag_down.png'
+      ],
+      dead: ['orc_dead.png']
+    };
+
+    const SPRITE_PATH = 'assets/sprites/orc/';
+
+    // Map logical pose names to filenames
+    const POSE = {
+      idle:              (f) => `orc_${f}_idle.png`,
+      walk:              (f) => `orc_${f}_walk.png`,
+      weapon_ready:      (f) => `orc_${f}_weapon_ready.png`,
+      kick_ready:        (f) => `orc_${f}_kick_ready.png`,
+      attack_forward:    (f) => `orc_${f}_attack_forward.png`,
+      attack_up:         (f) => `orc_${f}_attack_up.png`,
+      attack_diag_up:    (f) => `orc_${f}_attack_diag_up.png`,
+      kick_down:         (f) => `orc_${f}_kick_down.png`,
+      kick_diag_down:    (f) => `orc_${f}_kick_diag_down.png`,
+      dead:              ()  => 'orc_dead.png'
+    };
+
+    // ─── Image loading with fallback flag ─────────────────────────────────
+    const images = {};
+    let imagesReady = false;
+
+    function loadAllImages() {
+      const allNames = [
+        ...SPRITE_NAMES.left,
+        ...SPRITE_NAMES.right,
+        ...SPRITE_NAMES.dead
+      ];
+      let pending = allNames.length;
+
+      function done() {
+        pending--;
+        if (pending <= 0) imagesReady = true;
+      }
+
+      for (const name of allNames) {
+        const img = new Image();
+        img.onload  = done;
+        img.onerror = () => { img._failed = true; done(); };
+        img.src = SPRITE_PATH + name;
+        images[name] = img;
+      }
+    }
+
+    function getImage(filename) {
+      const img = images[filename];
+      if (img && !img._failed && img.complete && img.naturalWidth > 0) return img;
+      return null;
+    }
+
+    // ─── Orc fighter ──────────────────────────────────────────────────────
+    class Orc {
+      constructor(x, y, color, enemy) {
+        this.x = x;
+        this.y = y;
+        this.vx = 0;
+        this.vy = 0;
+        this.color = color;       // fallback capsule color
+        this.enemy = enemy;
+        this.hp = MAX_HP;
+        this.alive = true;
+        this.facing = x < CANVAS_WIDTH / 2 ? 'right' : 'left';
+        this.damageCooldown = 0;
+        this.attackTimer = 0;
+        this.attackPose = 'attack_forward';
+        this.walkPhase = Math.random() * Math.PI * 2;
+        this.moving = false;
+      }
+
+      update(dt) {
+        if (!this.alive) return;
+
+        this.damageCooldown = Math.max(0, this.damageCooldown - dt);
+        if (this.attackTimer > 0) {
+          this.attackTimer -= dt;
+        }
+
+        // Auto-move toward enemy
+        const dx = this.enemy.x - this.x;
+        const dy = this.enemy.y - this.y;
+        const dist = Math.hypot(dx, dy) || 1;
+
+        this.vx += (dx / dist) * MOVE_SPEED * dt * 3;
+        this.vy += (dy / dist) * MOVE_SPEED * dt * 3;
+
+        // Light friction
+        this.vx *= 0.92;
+        this.vy *= 0.92;
+
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        // Wall bounce
+        const r = HITBOX_RADIUS;
+        if (this.x - r < 0)       { this.x = r;       this.vx =  Math.abs(this.vx) * 0.8; }
+        if (this.x + r > CANVAS_WIDTH)  { this.x = CANVAS_WIDTH - r;  this.vx = -Math.abs(this.vx) * 0.8; }
+        if (this.y - r < 0)       { this.y = r;       this.vy =  Math.abs(this.vy) * 0.8; }
+        if (this.y + r > CANVAS_HEIGHT) { this.y = CANVAS_HEIGHT - r; this.vy = -Math.abs(this.vy) * 0.8; }
+
+        // Facing from horizontal direction toward enemy
+        if (Math.abs(dx) > 2) {
+          this.facing = dx > 0 ? 'right' : 'left';
+        }
+
+        const speed = Math.hypot(this.vx, this.vy);
+        this.moving = speed > 8;
+        if (this.moving) this.walkPhase += dt * WALK_BOB_SPEED;
+      }
+
+      // Pick sprite pose based on state and enemy position
+      getPose() {
+        if (!this.alive) return 'dead';
+
+        if (this.attackTimer > 0) return this.attackPose;
+
+        const edx = this.enemy.x - this.x;
+        const edy = this.enemy.y - this.y;
+        const dist = Math.hypot(edx, edy);
+
+        if (dist < CLOSE_RANGE && this.enemy.alive) {
+          // Enemy below or diagonal-below → kick ready
+          if (edy > 20 && Math.abs(edx) < edy * 1.2) return 'kick_ready';
+          return 'weapon_ready';
+        }
+
+        return this.moving ? 'walk' : 'idle';
+      }
+
+      getFilename() {
+        const pose = this.getPose();
+        if (pose === 'dead') return POSE.dead();
+        return POSE[pose](this.facing);
+      }
+
+      // Choose attack sprite from relative enemy direction
+      setAttackPoseFromEnemy() {
+        const edx = this.enemy.x - this.x;
+        const edy = this.enemy.y - this.y;
+        const ax = Math.abs(edx);
+        const ay = Math.abs(edy);
+
+        if (edy > ay * 0.5 && edy > 10) {
+          // Enemy is below
+          this.attackPose = ax > ay * 0.6 ? 'kick_diag_down' : 'kick_down';
+        } else if (edy < -ay * 0.5 && edy < -10) {
+          // Enemy is above
+          this.attackPose = ax > ay * 0.6 ? 'attack_diag_up' : 'attack_up';
+        } else {
+          this.attackPose = 'attack_forward';
+        }
+        this.attackTimer = ATTACK_DISPLAY_TIME;
+      }
+
+      takeDamage(amount) {
+        if (!this.alive || this.damageCooldown > 0) return;
+        this.hp -= amount;
+        this.damageCooldown = DAMAGE_COOLDOWN;
+        if (this.hp <= 0) {
+          this.hp = 0;
+          this.alive = false;
+          this.vx = 0;
+          this.vy = 0;
+        }
+      }
+
+      draw() {
+        const bob = (this.getPose() === 'walk' && this.alive)
+          ? Math.sin(this.walkPhase) * WALK_BOB_AMPLITUDE
+          : 0;
+
+        const drawY = this.y + bob;
+        const filename = this.getFilename();
+        const img = getImage(filename);
+
+        if (img) {
+          ctx.drawImage(
+            img,
+            this.x - SPRITE_WIDTH / 2,
+            drawY - SPRITE_HEIGHT / 2,
+            SPRITE_WIDTH,
+            SPRITE_HEIGHT
+          );
+        } else {
+          // Fallback capsule when sprite missing
+          drawFallbackCapsule(this.x, drawY, this.color, this.alive);
+        }
+
+        if (this.alive) drawHPBar(this.x, drawY - SPRITE_HEIGHT / 2 - 14, this.hp);
+      }
+    }
+
+    // ─── Drawing helpers ────────────────────────────────────────────────────
+    function drawFallbackCapsule(x, y, color, alive) {
+      ctx.save();
+      ctx.fillStyle = alive ? color : '#555';
+      ctx.beginPath();
+      ctx.ellipse(x, y, HITBOX_RADIUS * 0.7, HITBOX_RADIUS, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawHPBar(x, y, hp) {
+      const w = 60, h = 8;
+      const pct = hp / MAX_HP;
+      ctx.fillStyle = '#333';
+      ctx.fillRect(x - w / 2, y, w, h);
+      ctx.fillStyle = pct > 0.3 ? '#4caf50' : '#f44336';
+      ctx.fillRect(x - w / 2, y, w * pct, h);
+      ctx.strokeStyle = '#111';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - w / 2, y, w, h);
+    }
+
+    // ─── Collision: body hitboxes ───────────────────────────────────────────
+    function resolveBodyCollision(a, b) {
+      if (!a.alive || !b.alive) return;
+
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = HITBOX_RADIUS * 2;
+
+      if (dist >= minDist || dist === 0) return;
+
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const overlap = minDist - dist;
+
+      // Separate bodies
+      a.x -= nx * overlap * 0.5;
+      a.y -= ny * overlap * 0.5;
+      b.x += nx * overlap * 0.5;
+      b.y += ny * overlap * 0.5;
+
+      // Knockback
+      a.vx -= nx * KNOCKBACK_FORCE;
+      a.vy -= ny * KNOCKBACK_FORCE;
+      b.vx += nx * KNOCKBACK_FORCE;
+      b.vy += ny * KNOCKBACK_FORCE;
+
+      // Damage (cooldown handled inside takeDamage)
+      a.takeDamage(DAMAGE);
+      b.takeDamage(DAMAGE);
+
+      // Brief attack sprites
+      a.setAttackPoseFromEnemy();
+      b.setAttackPoseFromEnemy();
+    }
+
+    // ─── Game state ─────────────────────────────────────────────────────────
+    let orcA, orcB;
+    let lastTime = 0;
+
+    function initGame() {
+      orcB = new Orc(CANVAS_WIDTH - 180, CANVAS_HEIGHT / 2, '#c45c26');
+      orcA = new Orc(180, CANVAS_HEIGHT / 2, '#3d8b5e');
+      orcA.enemy = orcB;
+      orcB.enemy = orcA;
+    }
+
+    function drawArena() {
+      // Simple arena floor
+      ctx.fillStyle = '#2d4a3e';
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+      // Border
+      ctx.strokeStyle = '#5a7a62';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(2, 2, CANVAS_WIDTH - 4, CANVAS_HEIGHT - 4);
+
+      // Optional debug hitboxes (uncomment to see)
+      // for (const o of [orcA, orcB]) {
+      //   if (!o.alive) continue;
+      //   ctx.beginPath();
+      //   ctx.arc(o.x, o.y, HITBOX_RADIUS, 0, Math.PI * 2);
+      //   ctx.strokeStyle = 'rgba(255,0,0,0.3)';
+      //   ctx.stroke();
+      // }
+    }
+
+    function gameLoop(timestamp) {
+      const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+      lastTime = timestamp;
+
+      orcA.update(dt);
+      orcB.update(dt);
+      resolveBodyCollision(orcA, orcB);
+
+      drawArena();
+      orcA.draw();
+      orcB.draw();
+
+      // Winner text
+      if (!orcA.alive || !orcB.alive) {
+        const winner = orcA.alive ? 'Green Orc wins!' : orcB.alive ? 'Orange Orc wins!' : 'Draw!';
+        if (!orcA.alive && !orcB.alive) {
+          ctx.fillStyle = 'rgba(0,0,0,0.5)';
+          ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        }
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 48px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(winner, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+        ctx.font = '20px sans-serif';
+        ctx.fillStyle = '#aaa';
+        ctx.fillText('Press R to restart', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 40);
+      }
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // ─── Input ──────────────────────────────────────────────────────────────
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'r' || e.key === 'R') initGame();
+    });
+
+    // ─── Start ────────────────────────────────────────────────────────────
+    loadAllImages();
+    initGame();
+    requestAnimationFrame((t) => { lastTime = t; gameLoop(t); });
+  </script>
+</body>
+</html>
