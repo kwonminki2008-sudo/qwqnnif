@@ -3,62 +3,57 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Orc Arena v01</title>
+  <title>Orc Battle</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      background: #1a1a2e;
+      background: #000;
       display: flex;
       justify-content: center;
       align-items: center;
       min-height: 100vh;
-      font-family: sans-serif;
+      font-family: 'Segoe UI', Arial, sans-serif;
     }
-    canvas {
-      display: block;
-      border: 2px solid #444;
-      background: #1a1a2e;
-    }
-    #hint {
-      position: fixed;
-      bottom: 12px;
-      color: #888;
-      font-size: 14px;
-    }
+    canvas { display: block; background: #000; }
   </style>
 </head>
 <body>
-  <canvas id="game" width="1280" height="720"></canvas>
-  <div id="hint">Press R to restart</div>
+  <canvas id="game" width="720" height="1280"></canvas>
 
   <script>
-    // ─── Tunable constants (edit these) ───────────────────────────────────
-    const CANVAS_WIDTH  = 1280;
-    const CANVAS_HEIGHT = 720;
+    // ─── Tunable constants ──────────────────────────────────────────────────
+    const CANVAS_WIDTH  = 720;
+    const CANVAS_HEIGHT = 1280;
 
-    const ARENA_WIDTH   = 900;
-    const ARENA_HEIGHT  = 520;
+    const ARENA_WIDTH   = 420;
+    const ARENA_HEIGHT  = 560;
+    const UI_TOP        = 130;
+    const UI_BOTTOM     = 170;
     const ARENA_X       = (CANVAS_WIDTH - ARENA_WIDTH) / 2;
-    const ARENA_Y       = (CANVAS_HEIGHT - ARENA_HEIGHT) / 2;
+    const ARENA_Y       = UI_TOP + Math.floor((CANVAS_HEIGHT - UI_TOP - UI_BOTTOM - ARENA_HEIGHT) / 2);
 
     const SPRITE_WIDTH  = 110;
-    const SPRITE_HEIGHT = 110;
+    const SPRITE_HEIGHT = 140;
     const HITBOX_RADIUS = 30;
 
-    const MOVE_SPEED          = 220;
-    const MIN_SPEED           = 180;
-    const MAX_SPEED           = 240;
+    const MOVE_SPEED          = 230;
+    const MIN_SPEED           = 200;
+    const MAX_SPEED           = 250;
+    const FRICTION            = 1;
     const COLLISION_BOUNCE    = 1.0;
-    const KNOCKBACK_FORCE     = 120;
+    const KNOCKBACK_FORCE     = 140;
     const FACE_LOCK_TIME      = 0.5;
-    const DAMAGE              = 12;
+    const DAMAGE              = 8;
     const DAMAGE_COOLDOWN     = 0.6;
     const ATTACK_DISPLAY_TIME = 0.15;
 
     const MAX_HP             = 100;
     const WALK_BOB_AMPLITUDE = 4;
     const WALK_BOB_SPEED     = 10;
-    const CLOSE_RANGE        = 110;
+    const CLOSE_RANGE        = 100;
+
+    const FIGHTER_A_NAME = 'GREEN ORC';
+    const FIGHTER_B_NAME = 'ORANGE ORC';
     // ──────────────────────────────────────────────────────────────────────
 
     const canvas = document.getElementById('game');
@@ -83,40 +78,30 @@
     const SPRITE_PATH = 'assets/sprites/orc/';
 
     const POSE = {
-      idle:              (f) => `orc_${f}_idle.png`,
-      walk:              (f) => `orc_${f}_walk.png`,
-      weapon_ready:      (f) => `orc_${f}_weapon_ready.png`,
-      kick_ready:        (f) => `orc_${f}_kick_ready.png`,
-      attack_forward:    (f) => `orc_${f}_attack_forward.png`,
-      attack_up:         (f) => `orc_${f}_attack_up.png`,
-      attack_diag_up:    (f) => `orc_${f}_attack_diag_up.png`,
-      kick_down:         (f) => `orc_${f}_kick_down.png`,
-      kick_diag_down:    (f) => `orc_${f}_kick_diag_down.png`,
-      dead:              ()  => 'orc_dead.png'
+      idle:           (f) => `orc_${f}_idle.png`,
+      walk:           (f) => `orc_${f}_walk.png`,
+      weapon_ready:   (f) => `orc_${f}_weapon_ready.png`,
+      kick_ready:     (f) => `orc_${f}_kick_ready.png`,
+      attack_forward: (f) => `orc_${f}_attack_forward.png`,
+      attack_up:      (f) => `orc_${f}_attack_up.png`,
+      attack_diag_up: (f) => `orc_${f}_attack_diag_up.png`,
+      kick_down:      (f) => `orc_${f}_kick_down.png`,
+      kick_diag_down: (f) => `orc_${f}_kick_diag_down.png`,
+      dead:           ()  => 'orc_dead.png'
     };
 
     const images = {};
     const missingSprites = [];
 
     function loadAllImages() {
-      const allNames = [
-        ...SPRITE_NAMES.left,
-        ...SPRITE_NAMES.right,
-        ...SPRITE_NAMES.dead
-      ];
+      const allNames = [...SPRITE_NAMES.left, ...SPRITE_NAMES.right, ...SPRITE_NAMES.dead];
       let pending = allNames.length;
-
       function done() {
         pending--;
-        if (pending <= 0) {
-          if (missingSprites.length) {
-            console.warn('Missing sprites (' + missingSprites.length + '):', missingSprites);
-          } else {
-            console.log('All 19 sprites loaded from ' + SPRITE_PATH);
-          }
+        if (pending <= 0 && missingSprites.length) {
+          console.warn('Missing sprites:', missingSprites);
         }
       }
-
       for (const name of allNames) {
         const img = new Image();
         img.onload  = done;
@@ -126,21 +111,6 @@
       }
     }
 
-    function drawMissingSpriteDebug() {
-      if (!missingSprites.length) return;
-      const ox = ARENA_X + 8;
-      const oy = ARENA_Y + 8;
-      ctx.fillStyle = 'rgba(0,0,0,0.65)';
-      ctx.fillRect(ox, oy, 520, 18 + missingSprites.length * 14);
-      ctx.fillStyle = '#ff6b6b';
-      ctx.font = '12px monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText('Missing sprites (' + missingSprites.length + '):', ox + 6, oy + 14);
-      missingSprites.forEach((name, i) => {
-        ctx.fillText(name, ox + 6, oy + 28 + i * 14);
-      });
-    }
-
     function getImage(filename) {
       const img = images[filename];
       if (img && !img._failed && img.complete && img.naturalWidth > 0) return img;
@@ -148,19 +118,12 @@
     }
 
     function normalizeSpeed(vx, vy, target) {
-      let s = Math.hypot(vx, vy);
+      const s = Math.hypot(vx, vy);
       if (s < 1) {
         const a = Math.random() * Math.PI * 2;
         return { vx: Math.cos(a) * target, vy: Math.sin(a) * target };
       }
       const k = target / s;
-      return { vx: vx * k, vy: vy * k };
-    }
-
-    function clampMaxSpeed(vx, vy, max) {
-      const s = Math.hypot(vx, vy);
-      if (s <= max) return { vx, vy };
-      const k = max / s;
       return { vx: vx * k, vy: vy * k };
     }
 
@@ -184,7 +147,6 @@
         this.attackTimer = 0;
         this.attackPose = 'attack_forward';
         this.walkPhase = Math.random() * Math.PI * 2;
-        this.moving = true;
       }
 
       setFacingTowardEnemy() {
@@ -200,15 +162,19 @@
       }
 
       enforceConstantSpeed() {
-        let s = Math.hypot(this.vx, this.vy);
+        const s = Math.hypot(this.vx, this.vy);
         if (s < MIN_SPEED) {
           const n = normalizeSpeed(this.vx, this.vy, MOVE_SPEED);
           this.vx = n.vx;
           this.vy = n.vy;
           return;
         }
-        const capped = clampMaxSpeed(this.vx, this.vy, MAX_SPEED);
-        const n = normalizeSpeed(capped.vx, capped.vy, MOVE_SPEED);
+        if (s > MAX_SPEED) {
+          const k = MAX_SPEED / s;
+          this.vx *= k;
+          this.vy *= k;
+        }
+        const n = normalizeSpeed(this.vx, this.vy, MOVE_SPEED);
         this.vx = n.vx;
         this.vy = n.vy;
       }
@@ -220,6 +186,12 @@
         this.faceLockTime = Math.max(0, this.faceLockTime - dt);
         if (this.attackTimer > 0) this.attackTimer -= dt;
 
+        if (FRICTION !== 1) {
+          const drag = Math.pow(FRICTION, dt * 60);
+          this.vx *= drag;
+          this.vy *= drag;
+        }
+
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
@@ -229,22 +201,10 @@
         const top = ARENA_Y + r;
         const bottom = ARENA_Y + ARENA_HEIGHT - r;
 
-        if (this.x < left) {
-          this.x = left;
-          this.vx = -this.vx;
-        }
-        if (this.x > right) {
-          this.x = right;
-          this.vx = -this.vx;
-        }
-        if (this.y < top) {
-          this.y = top;
-          this.vy = -this.vy;
-        }
-        if (this.y > bottom) {
-          this.y = bottom;
-          this.vy = -this.vy;
-        }
+        if (this.x < left)  { this.x = left;  this.vx = -this.vx; }
+        if (this.x > right) { this.x = right; this.vx = -this.vx; }
+        if (this.y < top)   { this.y = top;   this.vy = -this.vy; }
+        if (this.y > bottom){ this.y = bottom;this.vy = -this.vy; }
 
         this.enforceConstantSpeed();
 
@@ -254,7 +214,6 @@
           }
         }
 
-        this.moving = true;
         this.walkPhase += dt * WALK_BOB_SPEED;
       }
 
@@ -270,7 +229,6 @@
           if (edy > 20 && Math.abs(edx) < edy * 1.2) return 'kick_ready';
           return 'weapon_ready';
         }
-
         return 'walk';
       }
 
@@ -316,51 +274,21 @@
 
       draw() {
         const bob = (this.getPose() === 'walk' && this.alive)
-          ? Math.sin(this.walkPhase) * WALK_BOB_AMPLITUDE
-          : 0;
-
+          ? Math.sin(this.walkPhase) * WALK_BOB_AMPLITUDE : 0;
         const drawY = this.y + bob;
-        const filename = this.getFilename();
-        const img = getImage(filename);
+        const img = getImage(this.getFilename());
 
         if (img) {
-          ctx.drawImage(
-            img,
-            this.x - SPRITE_WIDTH / 2,
-            drawY - SPRITE_HEIGHT / 2,
-            SPRITE_WIDTH,
-            SPRITE_HEIGHT
-          );
+          ctx.drawImage(img, this.x - SPRITE_WIDTH / 2, drawY - SPRITE_HEIGHT / 2, SPRITE_WIDTH, SPRITE_HEIGHT);
         } else {
-          drawFallbackCapsule(this.x, drawY, this.color, this.alive);
+          ctx.save();
+          ctx.fillStyle = this.alive ? this.color : '#555';
+          ctx.beginPath();
+          ctx.ellipse(this.x, drawY, HITBOX_RADIUS * 0.7, HITBOX_RADIUS, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
         }
-
-        if (this.alive) drawHPBar(this.x, drawY - SPRITE_HEIGHT / 2 - 14, this.hp);
       }
-    }
-
-    function drawFallbackCapsule(x, y, color, alive) {
-      ctx.save();
-      ctx.fillStyle = alive ? color : '#555';
-      ctx.beginPath();
-      ctx.ellipse(x, y, HITBOX_RADIUS * 0.7, HITBOX_RADIUS, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#222';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    function drawHPBar(x, y, hp) {
-      const w = 60, h = 8;
-      const pct = hp / MAX_HP;
-      ctx.fillStyle = '#333';
-      ctx.fillRect(x - w / 2, y, w, h);
-      ctx.fillStyle = pct > 0.3 ? '#4caf50' : '#f44336';
-      ctx.fillRect(x - w / 2, y, w * pct, h);
-      ctx.strokeStyle = '#111';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x - w / 2, y, w, h);
     }
 
     function resolveBodyCollision(a, b) {
@@ -370,7 +298,6 @@
       const dy = b.y - a.y;
       const dist = Math.hypot(dx, dy);
       const minDist = HITBOX_RADIUS * 2;
-
       if (dist >= minDist || dist === 0) return;
 
       const nx = dx / dist;
@@ -398,10 +325,8 @@
 
       const an = normalizeSpeed(a.vx, a.vy, MOVE_SPEED);
       const bn = normalizeSpeed(b.vx, b.vy, MOVE_SPEED);
-      a.vx = an.vx;
-      a.vy = an.vy;
-      b.vx = bn.vx;
-      b.vy = bn.vy;
+      a.vx = an.vx; a.vy = an.vy;
+      b.vx = bn.vx; b.vy = bn.vy;
 
       const aDamaged = a.takeDamage(DAMAGE);
       const bDamaged = b.takeDamage(DAMAGE);
@@ -413,26 +338,86 @@
       }
     }
 
+    function drawBottomHPBar(x, y, w, hp, color, label) {
+      const h = 28;
+      const pct = hp / MAX_HP;
+      ctx.fillStyle = '#222';
+      ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, w * pct, h);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(Math.ceil(hp) + ' HP', x + w / 2, y + 19);
+      ctx.font = '13px sans-serif';
+      ctx.fillStyle = '#ccc';
+      ctx.fillText('DMG: ' + DAMAGE, x + w / 2, y + h + 18);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#aaa';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(label, x, y - 6);
+    }
+
+    function drawUI() {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+      // Title
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 52px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('ORC BATTLE', CANVAS_WIDTH / 2, 62);
+
+      // Fighter names + VS
+      ctx.font = 'bold 20px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#4caf50';
+      ctx.fillText(FIGHTER_A_NAME, 24, 108);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#ff8c42';
+      ctx.fillText(FIGHTER_B_NAME, CANVAS_WIDTH - 24, 108);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 24px sans-serif';
+      ctx.fillText('VS', CANVAS_WIDTH / 2, 108);
+
+      // Arena interior
+      ctx.fillStyle = '#f0f0ea';
+      ctx.fillRect(ARENA_X, ARENA_Y, ARENA_WIDTH, ARENA_HEIGHT);
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 6;
+      ctx.strokeRect(ARENA_X, ARENA_Y, ARENA_WIDTH, ARENA_HEIGHT);
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(ARENA_X + 4, ARENA_Y + 4, ARENA_WIDTH - 8, ARENA_HEIGHT - 8);
+
+      // Bottom HP bars
+      const barW = 280;
+      const barY = CANVAS_HEIGHT - UI_BOTTOM + 30;
+      drawBottomHPBar(24, barY, barW, orcA.hp, '#4caf50', FIGHTER_A_NAME);
+      drawBottomHPBar(CANVAS_WIDTH - 24 - barW, barY, barW, orcB.hp, '#ff8c42', FIGHTER_B_NAME);
+
+      // Restart hint
+      ctx.fillStyle = '#666';
+      ctx.font = '13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Press R to restart', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 18);
+    }
+
     let orcA, orcB;
     let lastTime = 0;
 
     function initGame() {
-      orcB = new Orc(ARENA_X + ARENA_WIDTH - 110, ARENA_Y + ARENA_HEIGHT / 2, '#c45c26');
-      orcA = new Orc(ARENA_X + 110, ARENA_Y + ARENA_HEIGHT / 2, '#3d8b5e');
+      const midY = ARENA_Y + ARENA_HEIGHT / 2;
+      orcA = new Orc(ARENA_X + 95, midY, '#3d8b5e');
+      orcB = new Orc(ARENA_X + ARENA_WIDTH - 95, midY, '#c45c26');
       orcA.enemy = orcB;
       orcB.enemy = orcA;
       orcA.giveInitialVelocity();
       orcB.giveInitialVelocity();
-    }
-
-    function drawArena() {
-      ctx.fillStyle = '#1a1a2e';
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      ctx.fillStyle = '#2d4a3e';
-      ctx.fillRect(ARENA_X, ARENA_Y, ARENA_WIDTH, ARENA_HEIGHT);
-      ctx.strokeStyle = '#5a7a62';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(ARENA_X + 2, ARENA_Y + 2, ARENA_WIDTH - 4, ARENA_HEIGHT - 4);
     }
 
     function gameLoop(timestamp) {
@@ -443,24 +428,19 @@
       orcB.update(dt);
       resolveBodyCollision(orcA, orcB);
 
-      drawArena();
+      drawUI();
       orcA.draw();
       orcB.draw();
-      drawMissingSpriteDebug();
 
       if (!orcA.alive || !orcB.alive) {
-        const winner = orcA.alive ? 'Green Orc wins!' : orcB.alive ? 'Orange Orc wins!' : 'Draw!';
-        if (!orcA.alive && !orcB.alive) {
-          ctx.fillStyle = 'rgba(0,0,0,0.5)';
-          ctx.fillRect(ARENA_X, ARENA_Y, ARENA_WIDTH, ARENA_HEIGHT);
-        }
+        const winner = orcA.alive ? FIGHTER_A_NAME + ' WINS!' :
+                       orcB.alive ? FIGHTER_B_NAME + ' WINS!' : 'DRAW!';
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(ARENA_X, ARENA_Y, ARENA_WIDTH, ARENA_HEIGHT);
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 48px sans-serif';
+        ctx.font = 'bold 36px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(winner, ARENA_X + ARENA_WIDTH / 2, ARENA_Y + ARENA_HEIGHT / 2);
-        ctx.font = '20px sans-serif';
-        ctx.fillStyle = '#aaa';
-        ctx.fillText('Press R to restart', ARENA_X + ARENA_WIDTH / 2, ARENA_Y + ARENA_HEIGHT / 2 + 40);
+        ctx.fillText(winner, CANVAS_WIDTH / 2, ARENA_Y + ARENA_HEIGHT / 2);
       }
 
       requestAnimationFrame(gameLoop);
