@@ -52,9 +52,9 @@
     const CLOSE_RANGE        = 120;  // distance to switch to ready poses
 
     // Fake background / checkerboard removal (sprite preprocessing)
-    const BG_REMOVE_MIN_RGB          = 215; // near-white threshold
-    const BG_REMOVE_LIGHT_GRAY_MIN   = 170; // light checkerboard gray
-    const BG_REMOVE_MAX_CHANNEL_DIFF = 25;  // max(r,g,b) - min(r,g,b)
+    const BACKGROUND_REMOVE_ENABLED = true;
+    const BG_REMOVE_MIN             = 180; // r,g,b must exceed this
+    const BG_REMOVE_DIFF            = 70;  // max(r,g,b) - min(r,g,b)
     // ──────────────────────────────────────────────────────────────────────
 
     const canvas = document.getElementById('game');
@@ -98,11 +98,11 @@
     const missingSprites = [];
     let imagesReady = false;
 
-    function isBackgroundPixel(r, g, b) {
+    function isBackgroundPixel(r, g, b, a) {
+      if (!BACKGROUND_REMOVE_ENABLED || a === 0) return false;
       const diff = Math.max(r, g, b) - Math.min(r, g, b);
-      if (diff >= BG_REMOVE_MAX_CHANNEL_DIFF) return false;
-      if (r > BG_REMOVE_MIN_RGB && g > BG_REMOVE_MIN_RGB && b > BG_REMOVE_MIN_RGB) return true;
-      if (r > BG_REMOVE_LIGHT_GRAY_MIN && g > BG_REMOVE_LIGHT_GRAY_MIN && b > BG_REMOVE_LIGHT_GRAY_MIN) return true;
+      if (r > 250 && g > 250 && b > 250) return true;
+      if (r > BG_REMOVE_MIN && g > BG_REMOVE_MIN && b > BG_REMOVE_MIN && diff < BG_REMOVE_DIFF) return true;
       return false;
     }
 
@@ -114,12 +114,14 @@
       off.height = h;
       const octx = off.getContext('2d');
       octx.drawImage(img, 0, 0);
-      const data = octx.getImageData(0, 0, w, h);
-      const px = data.data;
-      for (let i = 0; i < px.length; i += 4) {
-        if (isBackgroundPixel(px[i], px[i + 1], px[i + 2])) px[i + 3] = 0;
+      if (BACKGROUND_REMOVE_ENABLED) {
+        const data = octx.getImageData(0, 0, w, h);
+        const px = data.data;
+        for (let i = 0; i < px.length; i += 4) {
+          if (isBackgroundPixel(px[i], px[i + 1], px[i + 2], px[i + 3])) px[i + 3] = 0;
+        }
+        octx.putImageData(data, 0, 0);
       }
-      octx.putImageData(data, 0, 0);
       return off;
     }
 
@@ -184,7 +186,7 @@
         this.enemy = enemy;
         this.hp = MAX_HP;
         this.alive = true;
-        this.facing = x < CANVAS_WIDTH / 2 ? 'left' : 'right';
+        this.facing = x < CANVAS_WIDTH / 2 ? 'right' : 'left';
         this.damageCooldown = 0;
         this.attackTimer = 0;
         this.attackPose = 'attack_forward';
@@ -224,7 +226,7 @@
 
         // Facing from horizontal direction toward enemy
         if (Math.abs(dx) > 2) {
-          this.facing = dx > 0 ? 'left' : 'right';
+          this.facing = dx > 0 ? 'right' : 'left';
         }
 
         const speed = Math.hypot(this.vx, this.vy);
