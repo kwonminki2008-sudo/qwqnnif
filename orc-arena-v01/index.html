@@ -40,27 +40,27 @@
     const SPRITE_HEIGHT = 96;
     const HITBOX_RADIUS = 28;
 
-    const MOVE_SPEED         = 90;   // pixels per second
-    const KNOCKBACK_FORCE    = 180;
+    const MOVE_ACCEL         = 420;
+    const MAX_SPEED          = 240;
+    const FRICTION           = 0.985;  // per-frame drag base (applied with dt)
+    const WALL_BOUNCE        = 0.88;
+    const COLLISION_BOUNCE   = 1.15;
+    const KNOCKBACK_FORCE    = 320;
+    const POST_HIT_REPEL_TIME = 0.4;
     const DAMAGE             = 12;
-    const DAMAGE_COOLDOWN    = 0.6;  // seconds between body hits
-    const ATTACK_DISPLAY_TIME = 0.15; // seconds to show attack sprite
+    const DAMAGE_COOLDOWN    = 0.6;
+    const ATTACK_DISPLAY_TIME = 0.15;
+    const WANDER_STRENGTH    = 90;
 
-    const MAX_HP        = 100;
+    const MAX_HP             = 100;
     const WALK_BOB_AMPLITUDE = 4;
     const WALK_BOB_SPEED     = 10;
-    const CLOSE_RANGE        = 120;  // distance to switch to ready poses
-
-    // Fake background / checkerboard removal (sprite preprocessing)
-    const BACKGROUND_REMOVE_ENABLED = true;
-    const BG_REMOVE_MIN             = 180; // r,g,b must exceed this
-    const BG_REMOVE_DIFF            = 70;  // max(r,g,b) - min(r,g,b)
+    const CLOSE_RANGE        = 120;
     // ──────────────────────────────────────────────────────────────────────
 
     const canvas = document.getElementById('game');
     const ctx    = canvas.getContext('2d');
 
-    // Sprite filenames grouped by facing
     const SPRITE_NAMES = {
       left: [
         'orc_left_idle.png', 'orc_left_walk.png', 'orc_left_weapon_ready.png',
@@ -79,7 +79,6 @@
 
     const SPRITE_PATH = 'assets/sprites/orc/';
 
-    // Map logical pose names to filenames
     const POSE = {
       idle:              (f) => `orc_${f}_idle.png`,
       walk:              (f) => `orc_${f}_walk.png`,
@@ -93,37 +92,9 @@
       dead:              ()  => 'orc_dead.png'
     };
 
-    // ─── Image loading with fallback flag ─────────────────────────────────
+    // ─── Image loading ────────────────────────────────────────────────────
     const images = {};
     const missingSprites = [];
-    let imagesReady = false;
-
-    function isBackgroundPixel(r, g, b, a) {
-      if (!BACKGROUND_REMOVE_ENABLED || a === 0) return false;
-      const diff = Math.max(r, g, b) - Math.min(r, g, b);
-      if (r > 250 && g > 250 && b > 250) return true;
-      if (r > BG_REMOVE_MIN && g > BG_REMOVE_MIN && b > BG_REMOVE_MIN && diff < BG_REMOVE_DIFF) return true;
-      return false;
-    }
-
-    function preprocessSprite(img) {
-      const w = img.naturalWidth;
-      const h = img.naturalHeight;
-      const off = document.createElement('canvas');
-      off.width = w;
-      off.height = h;
-      const octx = off.getContext('2d');
-      octx.drawImage(img, 0, 0);
-      if (BACKGROUND_REMOVE_ENABLED) {
-        const data = octx.getImageData(0, 0, w, h);
-        const px = data.data;
-        for (let i = 0; i < px.length; i += 4) {
-          if (isBackgroundPixel(px[i], px[i + 1], px[i + 2], px[i + 3])) px[i + 3] = 0;
-        }
-        octx.putImageData(data, 0, 0);
-      }
-      return off;
-    }
 
     function loadAllImages() {
       const allNames = [
@@ -136,7 +107,6 @@
       function done() {
         pending--;
         if (pending <= 0) {
-          imagesReady = true;
           if (missingSprites.length) {
             console.warn('Missing sprites (' + missingSprites.length + '):', missingSprites);
           } else {
@@ -147,9 +117,10 @@
 
       for (const name of allNames) {
         const img = new Image();
-        img.onload  = () => { images[name] = preprocessSprite(img); done(); };
+        img.onload  = done;
         img.onerror = () => { img._failed = true; missingSprites.push(name); done(); };
         img.src = SPRITE_PATH + name;
+        images[name] = img;
       }
     }
 
@@ -168,11 +139,15 @@
 
     function getImage(filename) {
       const img = images[filename];
-      if (!img || img._failed) return null;
-      const w = img.naturalWidth || img.width;
-      const h = img.naturalHeight || img.height;
-      if (w > 0 && h > 0) return img;
+      if (img && !img._failed && img.complete && img.naturalWidth > 0) return img;
       return null;
+    }
+
+    function clampSpeed(vx, vy, max) {
+      const s = Math.hypot(vx, vy);
+      if (s <= max) return { vx, vy };
+      const k = max / s;
+      return { vx: vx * k, vy: vy * k };
     }
 
     // ─── Orc fighter ──────────────────────────────────────────────────────
@@ -182,12 +157,13 @@
         this.y = y;
         this.vx = 0;
         this.vy = 0;
-        this.color = color;       // fallback capsule color
+        this.color = color;
         this.enemy = enemy;
         this.hp = MAX_HP;
         this.alive = true;
-        this.facing = x < CANVAS_WIDTH / 2 ? 'right' : 'left';
+        this.facing = x < CANVAS_WIDTH / 2 ? 'left' : 'right';
         this.damageCooldown = 0;
+        this.repelTimer = 0;
         this.attackTimer = 0;
         this.attackPose = 'attack_forward';
         this.walkPhase = Math.random() * Math.PI * 2;
@@ -198,46 +174,68 @@
         if (!this.alive) return;
 
         this.damageCooldown = Math.max(0, this.damageCooldown - dt);
-        if (this.attackTimer > 0) {
-          this.attackTimer -= dt;
-        }
+        this.repelTimer = Math.max(0, this.repelTimer - dt);
+        if (this.attackTimer > 0) this.attackTimer -= dt;
 
-        // Auto-move toward enemy
         const dx = this.enemy.x - this.x;
         const dy = this.enemy.y - this.y;
         const dist = Math.hypot(dx, dy) || 1;
 
-        this.vx += (dx / dist) * MOVE_SPEED * dt * 3;
-        this.vy += (dy / dist) * MOVE_SPEED * dt * 3;
+        // Mild steering toward enemy (paused briefly after hit)
+        if (this.repelTimer <= 0) {
+          this.vx += (dx / dist) * MOVE_ACCEL * dt;
+          this.vy += (dy / dist) * MOVE_ACCEL * dt;
+        }
 
-        // Light friction
-        this.vx *= 0.92;
-        this.vy *= 0.92;
+        // Small random wander
+        this.vx += (Math.random() - 0.5) * WANDER_STRENGTH * dt;
+        this.vy += (Math.random() - 0.5) * WANDER_STRENGTH * dt;
+
+        // Light drag
+        const drag = Math.pow(FRICTION, dt * 60);
+        this.vx *= drag;
+        this.vy *= drag;
+
+        // Cap speed
+        const capped = clampSpeed(this.vx, this.vy, MAX_SPEED);
+        this.vx = capped.vx;
+        this.vy = capped.vy;
 
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
         // Wall bounce
         const r = HITBOX_RADIUS;
-        if (this.x - r < 0)       { this.x = r;       this.vx =  Math.abs(this.vx) * 0.8; }
-        if (this.x + r > CANVAS_WIDTH)  { this.x = CANVAS_WIDTH - r;  this.vx = -Math.abs(this.vx) * 0.8; }
-        if (this.y - r < 0)       { this.y = r;       this.vy =  Math.abs(this.vy) * 0.8; }
-        if (this.y + r > CANVAS_HEIGHT) { this.y = CANVAS_HEIGHT - r; this.vy = -Math.abs(this.vy) * 0.8; }
-
-        // Facing from horizontal direction toward enemy
-        if (Math.abs(dx) > 2) {
-          this.facing = dx > 0 ? 'right' : 'left';
+        if (this.x - r < 0) {
+          this.x = r;
+          this.vx = Math.abs(this.vx) * WALL_BOUNCE;
+        }
+        if (this.x + r > CANVAS_WIDTH) {
+          this.x = CANVAS_WIDTH - r;
+          this.vx = -Math.abs(this.vx) * WALL_BOUNCE;
+        }
+        if (this.y - r < 0) {
+          this.y = r;
+          this.vy = Math.abs(this.vy) * WALL_BOUNCE;
+        }
+        if (this.y + r > CANVAS_HEIGHT) {
+          this.y = CANVAS_HEIGHT - r;
+          this.vy = -Math.abs(this.vy) * WALL_BOUNCE;
         }
 
-        const speed = Math.hypot(this.vx, this.vy);
-        this.moving = speed > 8;
+        // Facing from movement (inverted mapping to match sprite art)
+        if (Math.abs(this.vx) > 8) {
+          this.facing = this.vx > 0 ? 'left' : 'right';
+        } else if (Math.abs(dx) > 2) {
+          this.facing = dx > 0 ? 'left' : 'right';
+        }
+
+        this.moving = Math.hypot(this.vx, this.vy) > 12;
         if (this.moving) this.walkPhase += dt * WALK_BOB_SPEED;
       }
 
-      // Pick sprite pose based on state and enemy position
       getPose() {
         if (!this.alive) return 'dead';
-
         if (this.attackTimer > 0) return this.attackPose;
 
         const edx = this.enemy.x - this.x;
@@ -245,7 +243,6 @@
         const dist = Math.hypot(edx, edy);
 
         if (dist < CLOSE_RANGE && this.enemy.alive) {
-          // Enemy below or diagonal-below → kick ready
           if (edy > 20 && Math.abs(edx) < edy * 1.2) return 'kick_ready';
           return 'weapon_ready';
         }
@@ -259,7 +256,6 @@
         return POSE[pose](this.facing);
       }
 
-      // Choose attack sprite from relative enemy direction
       setAttackPoseFromEnemy() {
         const edx = this.enemy.x - this.x;
         const edy = this.enemy.y - this.y;
@@ -267,10 +263,8 @@
         const ay = Math.abs(edy);
 
         if (edy > ay * 0.5 && edy > 10) {
-          // Enemy is below
           this.attackPose = ax > ay * 0.6 ? 'kick_diag_down' : 'kick_down';
         } else if (edy < -ay * 0.5 && edy < -10) {
-          // Enemy is above
           this.attackPose = ax > ay * 0.6 ? 'attack_diag_up' : 'attack_up';
         } else {
           this.attackPose = 'attack_forward';
@@ -279,7 +273,7 @@
       }
 
       takeDamage(amount) {
-        if (!this.alive || this.damageCooldown > 0) return;
+        if (!this.alive || this.damageCooldown > 0) return false;
         this.hp -= amount;
         this.damageCooldown = DAMAGE_COOLDOWN;
         if (this.hp <= 0) {
@@ -288,6 +282,7 @@
           this.vx = 0;
           this.vy = 0;
         }
+        return true;
       }
 
       draw() {
@@ -308,7 +303,6 @@
             SPRITE_HEIGHT
           );
         } else {
-          // Fallback capsule when sprite missing
           drawFallbackCapsule(this.x, drawY, this.color, this.alive);
         }
 
@@ -316,7 +310,6 @@
       }
     }
 
-    // ─── Drawing helpers ────────────────────────────────────────────────────
     function drawFallbackCapsule(x, y, color, alive) {
       ctx.save();
       ctx.fillStyle = alive ? color : '#555';
@@ -341,7 +334,7 @@
       ctx.strokeRect(x - w / 2, y, w, h);
     }
 
-    // ─── Collision: body hitboxes ───────────────────────────────────────────
+    // ─── Body hitbox collision ──────────────────────────────────────────────
     function resolveBodyCollision(a, b) {
       if (!a.alive || !b.alive) return;
 
@@ -356,25 +349,43 @@
       const ny = dy / dist;
       const overlap = minDist - dist;
 
-      // Separate bodies
+      // 1. Separate immediately
       a.x -= nx * overlap * 0.5;
       a.y -= ny * overlap * 0.5;
       b.x += nx * overlap * 0.5;
       b.y += ny * overlap * 0.5;
 
-      // Knockback
+      // 2–3. Bounce + knockback impulse
+      const relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+      if (relVn < 0) {
+        const impulse = -relVn * COLLISION_BOUNCE;
+        a.vx -= impulse * nx;
+        a.vy -= impulse * ny;
+        b.vx += impulse * nx;
+        b.vy += impulse * ny;
+      }
+
       a.vx -= nx * KNOCKBACK_FORCE;
       a.vy -= ny * KNOCKBACK_FORCE;
       b.vx += nx * KNOCKBACK_FORCE;
       b.vy += ny * KNOCKBACK_FORCE;
 
-      // Damage (cooldown handled inside takeDamage)
-      a.takeDamage(DAMAGE);
-      b.takeDamage(DAMAGE);
+      const aCapped = clampSpeed(a.vx, a.vy, MAX_SPEED * 1.4);
+      const bCapped = clampSpeed(b.vx, b.vy, MAX_SPEED * 1.4);
+      a.vx = aCapped.vx;
+      a.vy = aCapped.vy;
+      b.vx = bCapped.vx;
+      b.vy = bCapped.vy;
 
-      // Brief attack sprites
-      a.setAttackPoseFromEnemy();
-      b.setAttackPoseFromEnemy();
+      // Damage on valid hit only
+      const aDamaged = a.takeDamage(DAMAGE);
+      const bDamaged = b.takeDamage(DAMAGE);
+      if (aDamaged || bDamaged) {
+        a.setAttackPoseFromEnemy();
+        b.setAttackPoseFromEnemy();
+        a.repelTimer = POST_HIT_REPEL_TIME;
+        b.repelTimer = POST_HIT_REPEL_TIME;
+      }
     }
 
     // ─── Game state ─────────────────────────────────────────────────────────
@@ -389,23 +400,11 @@
     }
 
     function drawArena() {
-      // Simple arena floor
       ctx.fillStyle = '#2d4a3e';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-      // Border
       ctx.strokeStyle = '#5a7a62';
       ctx.lineWidth = 4;
       ctx.strokeRect(2, 2, CANVAS_WIDTH - 4, CANVAS_HEIGHT - 4);
-
-      // Optional debug hitboxes (uncomment to see)
-      // for (const o of [orcA, orcB]) {
-      //   if (!o.alive) continue;
-      //   ctx.beginPath();
-      //   ctx.arc(o.x, o.y, HITBOX_RADIUS, 0, Math.PI * 2);
-      //   ctx.strokeStyle = 'rgba(255,0,0,0.3)';
-      //   ctx.stroke();
-      // }
     }
 
     function gameLoop(timestamp) {
@@ -421,7 +420,6 @@
       orcB.draw();
       drawMissingSpriteDebug();
 
-      // Winner text
       if (!orcA.alive || !orcB.alive) {
         const winner = orcA.alive ? 'Green Orc wins!' : orcB.alive ? 'Orange Orc wins!' : 'Draw!';
         if (!orcA.alive && !orcB.alive) {
@@ -440,12 +438,10 @@
       requestAnimationFrame(gameLoop);
     }
 
-    // ─── Input ──────────────────────────────────────────────────────────────
     window.addEventListener('keydown', (e) => {
       if (e.key === 'r' || e.key === 'R') initGame();
     });
 
-    // ─── Start ────────────────────────────────────────────────────────────
     loadAllImages();
     initGame();
     requestAnimationFrame((t) => { lastTime = t; gameLoop(t); });
