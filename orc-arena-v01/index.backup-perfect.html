@@ -63,17 +63,6 @@
 
     const SPRITE_PATH = 'assets/sprites/orc/';
 
-    const SPRITE_SCALE_OVERRIDES = {
-      'orc_left_attack_up.png': 1.14,
-      'orc_right_attack_up.png': 1.14,
-      'orc_left_attack_diag_up.png': 1.12,
-      'orc_right_attack_diag_up.png': 1.12,
-      'orc_left_kick_down.png': 1.15,
-      'orc_right_kick_down.png': 1.15,
-      'orc_left_kick_diag_down.png': 1.13,
-      'orc_right_kick_diag_down.png': 1.13
-    };
-
     const POSE = {
       idle:           (f) => `orc_${f}_idle.png`,
       walk:           (f) => `orc_${f}_walk.png`,
@@ -135,12 +124,10 @@
       return (typeof n === 'number' && isFinite(n) && n > 0) ? n : fb;
     }
 
-    function getSpriteDrawInfo(img, filename) {
+    function getSpriteDrawInfo(img) {
       ensureFixedScale();
       const crop = cropTransparent(img);
-      const baseScale = safeSize(fixedSpriteScale, BASE_RENDER_HEIGHT / safeSize(crop.sh, img.naturalHeight));
-      const scaleOverride = SPRITE_SCALE_OVERRIDES[filename] || 1;
-      const scale = baseScale * scaleOverride;
+      const scale = safeSize(fixedSpriteScale, BASE_RENDER_HEIGHT / safeSize(crop.sh, img.naturalHeight));
       const drawW = safeSize(crop.sw * scale, img.naturalWidth * scale);
       const drawH = safeSize(crop.sh * scale, BASE_RENDER_HEIGHT);
       return {
@@ -148,8 +135,8 @@
         scale,
         drawW,
         drawH,
-        anchorOffX: safeSize(fixedAnchorOffX * scaleOverride, drawW / 2),
-        anchorOffY: safeSize(fixedAnchorOffY * scaleOverride, drawH * 0.52),
+        anchorOffX: safeSize(fixedAnchorOffX, drawW / 2),
+        anchorOffY: safeSize(fixedAnchorOffY, drawH * 0.52),
         ok: crop.ok
       };
     }
@@ -379,20 +366,17 @@
         const center = arenaToScreen(this.x, this.y);
         const img = this.getCurrentImage();
 
-        const filename = this.getFilename();
-        const scaleOverride = SPRITE_SCALE_OVERRIDES[filename] || 1;
-
         if (img) {
           ensureFixedScale();
           const fbScale = BASE_RENDER_HEIGHT / safeSize(img.naturalHeight, 100);
-          const scale = safeSize(fixedSpriteScale, fbScale) * scaleOverride;
+          const scale = safeSize(fixedSpriteScale, fbScale);
           let drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
           let drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
           let drawX = center.x - drawW / 2;
           let drawY = center.y - drawH * 0.52;
 
           try {
-            const info = getSpriteDrawInfo(img, filename);
+            const info = getSpriteDrawInfo(img);
             drawW = safeSize(info.drawW, drawW);
             drawH = safeSize(info.drawH, drawH);
             drawX = center.x - safeSize(info.anchorOffX, drawW / 2);
