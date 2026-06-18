@@ -34,10 +34,11 @@
     const VIEW_TOP         = 108;
 
     const BASE_RENDER_HEIGHT   = 130;
-    const HITBOX_RADIUS        = 30;
+    const HITBOX_RADIUS        = 28;
 
     const UNIT_SPEED          = 220;
-    const MIN_WALL_BOUNCE     = UNIT_SPEED * 0.35;
+    const MIN_WALL_BOUNCE     = UNIT_SPEED * 0.55;
+    const WALL_BOUNCE_COOLDOWN = 0.06;
     const FACE_LOCK_TIME      = 0.5;
     const DAMAGE              = 8;
     const DAMAGE_COOLDOWN     = 0.6;
@@ -73,6 +74,8 @@
     const images = {};
     const spriteCropCache = {};
     let fixedSpriteScale = null;
+    let fixedAnchorOffX = null;
+    let fixedAnchorOffY = null;
 
     function cropTransparent(img) {
       const key = img.src;
@@ -127,8 +130,8 @@
         scale,
         drawW,
         drawH,
-        anchorOffX: (crop.bodyCx - crop.sx) * scale,
-        anchorOffY: (crop.bodyCy - crop.sy) * scale,
+        anchorOffX: safeSize(fixedAnchorOffX, drawW / 2),
+        anchorOffY: safeSize(fixedAnchorOffY, drawH * 0.52),
         ok: crop.ok
       };
     }
@@ -140,6 +143,8 @@
       if (!base || base.naturalHeight < 1) return;
       const crop = cropTransparent(base);
       fixedSpriteScale = BASE_RENDER_HEIGHT / safeSize(crop.sh, base.naturalHeight);
+      fixedAnchorOffX = (crop.bodyCx - crop.sx) * fixedSpriteScale;
+      fixedAnchorOffY = (crop.bodyCy - crop.sy) * fixedSpriteScale;
     }
 
     function loadAllImages() {
@@ -211,6 +216,8 @@
         this.readyPose = 'weapon_ready';
         this.inCloseRange = false;
         this.walkPhase = Math.random() * Math.PI * 2;
+        this.wallBounceCooldown = 0;
+        this.lastWallHit = null;
       }
 
       getFilename() {
@@ -243,28 +250,51 @@
 
       resolveWallBounce() {
         const r = HITBOX_RADIUS;
-        if (this.x < r) {
-          this.x = r;
-          this.vx = Math.max(Math.abs(this.vx), MIN_WALL_BOUNCE);
+        const maxX = ARENA_VIEW_SIZE - r;
+        const maxY = ARENA_VIEW_SIZE - r;
+
+        if (this.x <= r) {
+          this.x = r + 0.5;
+          if (this.wallBounceCooldown <= 0 || this.lastWallHit !== 'left') {
+            this.vx = Math.max(Math.abs(this.vx), MIN_WALL_BOUNCE);
+            this.wallBounceCooldown = WALL_BOUNCE_COOLDOWN;
+            this.lastWallHit = 'left';
+          }
+        } else if (this.x >= maxX) {
+          this.x = maxX - 0.5;
+          if (this.wallBounceCooldown <= 0 || this.lastWallHit !== 'right') {
+            this.vx = -Math.max(Math.abs(this.vx), MIN_WALL_BOUNCE);
+            this.wallBounceCooldown = WALL_BOUNCE_COOLDOWN;
+            this.lastWallHit = 'right';
+          }
         }
-        if (this.x > ARENA_VIEW_SIZE - r) {
-          this.x = ARENA_VIEW_SIZE - r;
-          this.vx = -Math.max(Math.abs(this.vx), MIN_WALL_BOUNCE);
-        }
-        if (this.y < r) {
-          this.y = r;
-          this.vy = Math.max(Math.abs(this.vy), MIN_WALL_BOUNCE);
-        }
-        if (this.y > ARENA_VIEW_SIZE - r) {
-          this.y = ARENA_VIEW_SIZE - r;
-          this.vy = -Math.max(Math.abs(this.vy), MIN_WALL_BOUNCE);
+        if (this.y <= r) {
+          this.y = r + 0.5;
+          if (this.wallBounceCooldown <= 0 || this.lastWallHit !== 'top') {
+            this.vy = Math.max(Math.abs(this.vy), MIN_WALL_BOUNCE);
+            this.wallBounceCooldown = WALL_BOUNCE_COOLDOWN;
+            this.lastWallHit = 'top';
+          }
+        } else if (this.y >= maxY) {
+          this.y = maxY - 0.5;
+          if (this.wallBounceCooldown <= 0 || this.lastWallHit !== 'bottom') {
+            this.vy = -Math.max(Math.abs(this.vy), MIN_WALL_BOUNCE);
+            this.wallBounceCooldown = WALL_BOUNCE_COOLDOWN;
+            this.lastWallHit = 'bottom';
+          }
         }
         this.enforceConstantSpeed();
       }
 
-      clampPosition() {
+      applyAntiStuck() {
         this.x = clampArena(this.x);
         this.y = clampArena(this.y);
+        const s = Math.hypot(this.vx, this.vy);
+        if (!isFinite(this.vx) || !isFinite(this.vy) || s < 1) {
+          const a = Math.random() * Math.PI * 2;
+          this.vx = Math.cos(a) * UNIT_SPEED;
+          this.vy = Math.sin(a) * UNIT_SPEED;
+        }
         this.enforceConstantSpeed();
       }
 
@@ -273,14 +303,15 @@
 
         this.damageCooldown = Math.max(0, this.damageCooldown - dt);
         this.faceLockTime = Math.max(0, this.faceLockTime - dt);
+        this.wallBounceCooldown = Math.max(0, this.wallBounceCooldown - dt);
+        if (this.wallBounceCooldown <= 0) this.lastWallHit = null;
         if (this.attackTimer > 0) this.attackTimer -= dt;
         if (this.readyTimer > 0) this.readyTimer -= dt;
 
         this.x += this.vx * dt;
         this.y += this.vy * dt;
         this.resolveWallBounce();
-        this.enforceConstantSpeed();
-        this.clampPosition();
+        this.applyAntiStuck();
 
         if (this.faceLockTime > 0) {
           this.setFacingTowardEnemy();
@@ -364,30 +395,29 @@
       }
 
       drawSprite() {
+        const center = arenaToScreen(this.x, this.y);
         const bob = (this.getPose() === 'walk' && this.alive)
           ? Math.sin(this.walkPhase) * WALK_BOB_AMPLITUDE : 0;
-        const body = arenaToScreen(this.x, this.y + bob);
         const img = this.getCurrentImage();
-        let drawH = BASE_RENDER_HEIGHT;
 
         if (img) {
           ensureFixedScale();
           const fbScale = BASE_RENDER_HEIGHT / safeSize(img.naturalHeight, 100);
           const scale = safeSize(fixedSpriteScale, fbScale);
           let drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
-          drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
-          let drawX = body.x - drawW / 2;
-          let drawY = body.y - drawH * 0.52;
+          let drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
+          let drawX = center.x - drawW / 2;
+          let drawY = center.y - drawH * 0.52 + bob;
 
           try {
             const info = getSpriteDrawInfo(img);
             const shift = this.getVisualShift(bob, info);
             drawW = safeSize(info.drawW, drawW);
             drawH = safeSize(info.drawH, drawH);
-            drawX = body.x - safeSize(info.anchorOffX, drawW / 2) + shift.x;
-            drawY = body.y - safeSize(info.anchorOffY, drawH * 0.52) + shift.y;
-            if (!isFinite(drawX)) drawX = body.x - drawW / 2;
-            if (!isFinite(drawY)) drawY = body.y - drawH * 0.52;
+            drawX = center.x - safeSize(info.anchorOffX, drawW / 2) + shift.x;
+            drawY = center.y - safeSize(info.anchorOffY, drawH * 0.52) + bob + shift.y;
+            if (!isFinite(drawX)) drawX = center.x - drawW / 2;
+            if (!isFinite(drawY)) drawY = center.y - drawH * 0.52 + bob;
             if (info.ok && info.crop.sw > 0 && info.crop.sh > 0) {
               ctx.drawImage(
                 img,
@@ -400,36 +430,40 @@
           } catch (e) {
             drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
             drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
-            drawX = body.x - drawW / 2;
-            drawY = body.y - drawH * 0.52;
+            drawX = center.x - drawW / 2;
+            drawY = center.y - drawH * 0.52 + bob;
             ctx.drawImage(img, drawX, drawY, drawW, drawH);
           }
         } else {
           ctx.save();
           ctx.fillStyle = this.alive ? this.color : '#555';
           ctx.beginPath();
-          ctx.ellipse(body.x, body.y, HITBOX_RADIUS * 0.7, HITBOX_RADIUS, 0, 0, Math.PI * 2);
+          ctx.ellipse(center.x, center.y + bob, HITBOX_RADIUS * 0.7, HITBOX_RADIUS, 0, 0, Math.PI * 2);
           ctx.fill();
           ctx.restore();
         }
 
-        return { screenX: body.x, screenY: body.y, drawH };
       }
 
-      drawHPBar(screenX, screenY, drawH) {
+      drawHeadHPBar() {
         if (!this.alive) return;
-        const w = 58;
-        const h = 8;
-        const barY = screenY - drawH / 2 - 14;
+        const barW = 52;
+        const barH = 7;
+        let hpX = this.x - barW / 2;
+        let hpY = this.y - HITBOX_RADIUS - 18;
+        hpX = Math.max(4, Math.min(hpX, ARENA_VIEW_SIZE - barW - 4));
+        if (this.y - HITBOX_RADIUS - 18 < 6) {
+          hpY = this.y + HITBOX_RADIUS + 8;
+        } else {
+          hpY = Math.max(6, hpY);
+        }
+        const sx = VIEW_LEFT + hpX;
+        const sy = VIEW_TOP + hpY;
         const pct = this.hp / MAX_HP;
-
         ctx.fillStyle = '#000';
-        ctx.fillRect(screenX - w / 2, barY, w, h);
+        ctx.fillRect(sx, sy, barW, barH);
         ctx.fillStyle = '#4caf50';
-        ctx.fillRect(screenX - w / 2, barY, w * pct, h);
-        ctx.strokeStyle = '#888';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(screenX - w / 2, barY, w, h);
+        ctx.fillRect(sx, sy, barW * pct, barH);
       }
     }
 
@@ -465,8 +499,8 @@
       const bn = normalizeSpeed(b.vx, b.vy, UNIT_SPEED);
       a.vx = an.vx; a.vy = an.vy;
       b.vx = bn.vx; b.vy = bn.vy;
-      a.clampPosition();
-      b.clampPosition();
+      a.applyAntiStuck();
+      b.applyAntiStuck();
 
       const aDamaged = a.takeDamage(DAMAGE);
       const bDamaged = b.takeDamage(DAMAGE);
@@ -543,12 +577,13 @@
         ctx.stroke();
       }
 
-      const infoA = orcA.drawSprite();
-      const infoB = orcB.drawSprite();
-      orcA.drawHPBar(infoA.screenX, infoA.screenY, infoA.drawH);
-      orcB.drawHPBar(infoB.screenX, infoB.screenY, infoB.drawH);
+      orcA.drawSprite();
+      orcB.drawSprite();
 
       ctx.restore();
+
+      orcA.drawHeadHPBar();
+      orcB.drawHeadHPBar();
 
       ctx.strokeStyle = '#7a6490';
       ctx.lineWidth = 5;
