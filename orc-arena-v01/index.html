@@ -29,20 +29,14 @@
     const GAME_WIDTH  = 540;
     const GAME_HEIGHT = 960;
 
-    const ARENA_WORLD_SIZE = 900;
     const ARENA_VIEW_SIZE  = 500;
     const VIEW_LEFT        = (GAME_WIDTH - ARENA_VIEW_SIZE) / 2;
     const VIEW_TOP         = 108;
 
-    const SPRITE_TARGET_HEIGHT = 150;
-    const HITBOX_RADIUS        = 28;
+    const SPRITE_TARGET_HEIGHT = 130;
+    const HITBOX_RADIUS        = 34;
 
-    const MOVE_SPEED          = 235;
-    const MIN_SPEED           = 200;
-    const MAX_SPEED           = 250;
-    const COLLISION_BOUNCE    = 1.0;
-    const KNOCKBACK_FORCE     = 150;
-    const CAMERA_LERP         = 0.08;
+    const UNIT_SPEED          = 220;
     const FACE_LOCK_TIME      = 0.5;
     const DAMAGE              = 8;
     const DAMAGE_COOLDOWN     = 0.6;
@@ -52,8 +46,6 @@
     const WALK_BOB_AMPLITUDE = 3;
     const WALK_BOB_SPEED     = 10;
     const CLOSE_RANGE        = 95;
-
-    const WORLD_CENTER = ARENA_WORLD_SIZE / 2;
     // ──────────────────────────────────────────────────────────────────────
 
     const canvas = document.getElementById('game');
@@ -75,7 +67,6 @@
     };
 
     const images = {};
-    const camera = { x: 0, y: 0 };
 
     function loadAllImages() {
       const names = [
@@ -119,56 +110,12 @@
       return { vx: vx * k, vy: vy * k };
     }
 
-    function worldToScreen(wx, wy) {
-      return {
-        x: wx - camera.x + VIEW_LEFT,
-        y: wy - camera.y + VIEW_TOP
-      };
+    function arenaToScreen(ax, ay) {
+      return { x: VIEW_LEFT + ax, y: VIEW_TOP + ay };
     }
 
-    function clampCamera(x, y) {
-      const max = ARENA_WORLD_SIZE - ARENA_VIEW_SIZE;
-      return {
-        x: Math.max(0, Math.min(max, x)),
-        y: Math.max(0, Math.min(max, y))
-      };
-    }
-
-    function updateCamera() {
-      const centerCam = clampCamera(WORLD_CENTER - ARENA_VIEW_SIZE / 2, WORLD_CENTER - ARENA_VIEW_SIZE / 2);
-      let targetX = centerCam.x;
-      let targetY = centerCam.y;
-
-      const alive = [];
-      if (orcA.alive) alive.push(orcA);
-      if (orcB.alive) alive.push(orcB);
-
-      if (alive.length === 1) {
-        const f = alive[0];
-        const c = clampCamera(f.x - ARENA_VIEW_SIZE / 2, f.y - ARENA_VIEW_SIZE / 2);
-        targetX = c.x;
-        targetY = c.y;
-      } else if (alive.length === 2) {
-        const distA = Math.hypot(orcA.x - WORLD_CENTER, orcA.y - WORLD_CENTER);
-        const distB = Math.hypot(orcB.x - WORLD_CENTER, orcB.y - WORLD_CENTER);
-        const focus = distA >= distB ? orcA : orcB;
-        const c = clampCamera(focus.x - ARENA_VIEW_SIZE / 2, focus.y - ARENA_VIEW_SIZE / 2);
-        targetX = c.x;
-        targetY = c.y;
-
-        const nearCenter = Math.min(distA, distB);
-        if (nearCenter < 130) {
-          const blend = 1 - nearCenter / 130;
-          targetX = targetX * (1 - blend) + centerCam.x * blend;
-          targetY = targetY * (1 - blend) + centerCam.y * blend;
-          const clamped = clampCamera(targetX, targetY);
-          targetX = clamped.x;
-          targetY = clamped.y;
-        }
-      }
-
-      camera.x += (targetX - camera.x) * CAMERA_LERP;
-      camera.y += (targetY - camera.y) * CAMERA_LERP;
+    function clampArena(v) {
+      return Math.max(HITBOX_RADIUS, Math.min(ARENA_VIEW_SIZE - HITBOX_RADIUS, v));
     }
 
     class Orc {
@@ -207,35 +154,30 @@
 
       giveInitialVelocity() {
         const angle = Math.random() * Math.PI * 2;
-        this.vx = Math.cos(angle) * MOVE_SPEED;
-        this.vy = Math.sin(angle) * MOVE_SPEED;
+        this.vx = Math.cos(angle) * UNIT_SPEED;
+        this.vy = Math.sin(angle) * UNIT_SPEED;
         this.facing = this.vx >= 0 ? 'right' : 'left';
       }
 
       enforceConstantSpeed() {
-        let s = Math.hypot(this.vx, this.vy);
-        if (s < MIN_SPEED) {
-          const n = normalizeSpeed(this.vx, this.vy, MOVE_SPEED);
-          this.vx = n.vx;
-          this.vy = n.vy;
-          return;
-        }
-        if (s > MAX_SPEED) {
-          const k = MAX_SPEED / s;
-          this.vx *= k;
-          this.vy *= k;
-        }
-        const n = normalizeSpeed(this.vx, this.vy, MOVE_SPEED);
+        const n = normalizeSpeed(this.vx, this.vy, UNIT_SPEED);
         this.vx = n.vx;
         this.vy = n.vy;
       }
 
       resolveWallBounce() {
         const r = HITBOX_RADIUS;
-        if (this.x - r < 0) { this.x = r; this.vx = -Math.abs(this.vx); }
-        if (this.x + r > ARENA_WORLD_SIZE) { this.x = ARENA_WORLD_SIZE - r; this.vx = Math.abs(this.vx); }
-        if (this.y - r < 0) { this.y = r; this.vy = -Math.abs(this.vy); }
-        if (this.y + r > ARENA_WORLD_SIZE) { this.y = ARENA_WORLD_SIZE - r; this.vy = Math.abs(this.vy); }
+        if (this.x < r) { this.x = r; this.vx = Math.abs(this.vx); }
+        if (this.x > ARENA_VIEW_SIZE - r) { this.x = ARENA_VIEW_SIZE - r; this.vx = -Math.abs(this.vx); }
+        if (this.y < r) { this.y = r; this.vy = Math.abs(this.vy); }
+        if (this.y > ARENA_VIEW_SIZE - r) { this.y = ARENA_VIEW_SIZE - r; this.vy = -Math.abs(this.vy); }
+        this.enforceConstantSpeed();
+      }
+
+      clampPosition() {
+        this.x = clampArena(this.x);
+        this.y = clampArena(this.y);
+        this.enforceConstantSpeed();
       }
 
       update(dt) {
@@ -249,9 +191,12 @@
         this.y += this.vy * dt;
         this.resolveWallBounce();
         this.enforceConstantSpeed();
+        this.clampPosition();
 
-        if (this.faceLockTime <= 0 && this.attackTimer <= 0) {
-          if (Math.abs(this.vx) > 8) this.facing = this.vx > 0 ? 'right' : 'left';
+        if (this.faceLockTime > 0) {
+          this.setFacingTowardEnemy();
+        } else if (this.attackTimer <= 0 && Math.abs(this.vx) > 8) {
+          this.facing = this.vx > 0 ? 'right' : 'left';
         }
 
         this.walkPhase += dt * WALK_BOB_SPEED;
@@ -309,7 +254,7 @@
       drawSprite() {
         const bob = (this.getPose() === 'walk' && this.alive)
           ? Math.sin(this.walkPhase) * WALK_BOB_AMPLITUDE : 0;
-        const screen = worldToScreen(this.x, this.y + bob);
+        const screen = arenaToScreen(this.x, this.y + bob);
         const img = this.getCurrentImage();
         let drawH = SPRITE_TARGET_HEIGHT;
 
@@ -373,22 +318,20 @@
 
       const relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
       if (relVn < 0) {
-        const impulse = -relVn * COLLISION_BOUNCE;
-        a.vx -= impulse * nx;
-        a.vy -= impulse * ny;
-        b.vx += impulse * nx;
-        b.vy += impulse * ny;
+        const v1n = a.vx * nx + a.vy * ny;
+        const v2n = b.vx * nx + b.vy * ny;
+        a.vx += (v2n - v1n) * nx;
+        a.vy += (v2n - v1n) * ny;
+        b.vx += (v1n - v2n) * nx;
+        b.vy += (v1n - v2n) * ny;
       }
 
-      a.vx -= nx * KNOCKBACK_FORCE;
-      a.vy -= ny * KNOCKBACK_FORCE;
-      b.vx += nx * KNOCKBACK_FORCE;
-      b.vy += ny * KNOCKBACK_FORCE;
-
-      const an = normalizeSpeed(a.vx, a.vy, MOVE_SPEED);
-      const bn = normalizeSpeed(b.vx, b.vy, MOVE_SPEED);
+      const an = normalizeSpeed(a.vx, a.vy, UNIT_SPEED);
+      const bn = normalizeSpeed(b.vx, b.vy, UNIT_SPEED);
       a.vx = an.vx; a.vy = an.vy;
       b.vx = bn.vx; b.vy = bn.vy;
+      a.clampPosition();
+      b.clampPosition();
 
       const aDamaged = a.takeDamage(DAMAGE);
       const bDamaged = b.takeDamage(DAMAGE);
@@ -428,31 +371,21 @@
       ctx.rect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
       ctx.clip();
 
-      const wx = camera.x;
-      const wy = camera.y;
-
-      ctx.fillStyle = '#1e1828';
-      ctx.fillRect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
-
       ctx.fillStyle = '#2a2236';
-      ctx.fillRect(VIEW_LEFT - wx, VIEW_TOP - wy, ARENA_WORLD_SIZE, ARENA_WORLD_SIZE);
-
-      ctx.strokeStyle = '#4a3d5c';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(VIEW_LEFT - wx, VIEW_TOP - wy, ARENA_WORLD_SIZE, ARENA_WORLD_SIZE);
+      ctx.fillRect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
 
       const tile = 60;
       ctx.strokeStyle = 'rgba(90,70,110,0.25)';
       ctx.lineWidth = 1;
-      for (let x = 0; x <= ARENA_WORLD_SIZE; x += tile) {
-        const sx = VIEW_LEFT + x - wx;
+      for (let x = 0; x <= ARENA_VIEW_SIZE; x += tile) {
+        const sx = VIEW_LEFT + x;
         ctx.beginPath();
         ctx.moveTo(sx, VIEW_TOP);
         ctx.lineTo(sx, VIEW_TOP + ARENA_VIEW_SIZE);
         ctx.stroke();
       }
-      for (let y = 0; y <= ARENA_WORLD_SIZE; y += tile) {
-        const sy = VIEW_TOP + y - wy;
+      for (let y = 0; y <= ARENA_VIEW_SIZE; y += tile) {
+        const sy = VIEW_TOP + y;
         ctx.beginPath();
         ctx.moveTo(VIEW_LEFT, sy);
         ctx.lineTo(VIEW_LEFT + ARENA_VIEW_SIZE, sy);
@@ -478,14 +411,13 @@
     let lastTime = 0;
 
     function initGame() {
-      orcA = new Orc(WORLD_CENTER - 120, WORLD_CENTER, '#3d8b5e', '#4caf50');
-      orcB = new Orc(WORLD_CENTER + 120, WORLD_CENTER, '#c45c26', '#e8944a');
+      const mid = ARENA_VIEW_SIZE / 2;
+      orcA = new Orc(mid - 100, mid, '#3d8b5e', '#4caf50');
+      orcB = new Orc(mid + 100, mid, '#c45c26', '#e8944a');
       orcA.enemy = orcB;
       orcB.enemy = orcA;
       orcA.giveInitialVelocity();
       orcB.giveInitialVelocity();
-      camera.x = WORLD_CENTER - ARENA_VIEW_SIZE / 2;
-      camera.y = WORLD_CENTER - ARENA_VIEW_SIZE / 2;
     }
 
     function gameLoop(timestamp) {
@@ -495,7 +427,6 @@
       orcA.update(dt);
       orcB.update(dt);
       resolveBodyCollision(orcA, orcB);
-      updateCamera();
 
       drawFixedUI();
       drawArenaWorld();
