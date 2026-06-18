@@ -79,51 +79,67 @@
       if (spriteCropCache[key]) return spriteCropCache[key];
       const w = img.naturalWidth;
       const h = img.naturalHeight;
-      const c = document.createElement('canvas');
-      c.width = w;
-      c.height = h;
-      const cctx = c.getContext('2d');
-      cctx.drawImage(img, 0, 0);
-      const data = cctx.getImageData(0, 0, w, h).data;
-      let minX = w, minY = h, maxX = 0, maxY = 0;
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          if (data[(y * w + x) * 4 + 3] > 10) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
+      const fallback = { sx: 0, sy: 0, sw: w, sh: h, bodyCx: w / 2, bodyCy: h * 0.52, ok: false };
+      try {
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        const cctx = c.getContext('2d');
+        cctx.drawImage(img, 0, 0);
+        const data = cctx.getImageData(0, 0, w, h).data;
+        let minX = w, minY = h, maxX = 0, maxY = 0;
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            if (data[(y * w + x) * 4 + 3] > 10) {
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
           }
         }
+        if (maxX < minX) { spriteCropCache[key] = fallback; return fallback; }
+        const cw = maxX - minX + 1;
+        const ch = maxY - minY + 1;
+        if (cw < 1 || ch < 1) { spriteCropCache[key] = fallback; return fallback; }
+        const crop = { sx: minX, sy: minY, sw: cw, sh: ch, bodyCx: minX + cw / 2, bodyCy: minY + ch * 0.52, ok: true };
+        spriteCropCache[key] = crop;
+        return crop;
+      } catch (e) {
+        spriteCropCache[key] = fallback;
+        return fallback;
       }
-      if (maxX < minX) { minX = 0; minY = 0; maxX = w - 1; maxY = h - 1; }
-      const cw = maxX - minX + 1;
-      const ch = maxY - minY + 1;
-      const crop = { sx: minX, sy: minY, sw: cw, sh: ch, bodyCx: minX + cw / 2, bodyCy: minY + ch * 0.52 };
-      spriteCropCache[key] = crop;
-      return crop;
     }
 
-    function ensureFixedScale() {
-      if (fixedSpriteScale) return;
-      const base = getImage('orc_right_walk.png') || getImage('orc_left_walk.png');
-      if (!base) return;
-      const crop = cropTransparent(base);
-      fixedSpriteScale = BASE_RENDER_HEIGHT / crop.sh;
+    function safeSize(n, fallback) {
+      const fb = (typeof fallback === 'number' && isFinite(fallback) && fallback > 0) ? fallback : 1;
+      return (typeof n === 'number' && isFinite(n) && n > 0) ? n : fb;
     }
 
     function getSpriteDrawInfo(img) {
       ensureFixedScale();
       const crop = cropTransparent(img);
-      const scale = fixedSpriteScale || (BASE_RENDER_HEIGHT / crop.sh);
+      const scale = safeSize(fixedSpriteScale, BASE_RENDER_HEIGHT / safeSize(crop.sh, img.naturalHeight));
+      const drawW = safeSize(crop.sw * scale, img.naturalWidth * scale);
+      const drawH = safeSize(crop.sh * scale, BASE_RENDER_HEIGHT);
       return {
         crop,
         scale,
-        drawW: crop.sw * scale,
-        drawH: crop.sh * scale,
+        drawW,
+        drawH,
         anchorOffX: (crop.bodyCx - crop.sx) * scale,
-        anchorOffY: (crop.bodyCy - crop.sy) * scale
+        anchorOffY: (crop.bodyCy - crop.sy) * scale,
+        ok: crop.ok
       };
+    }
+
+    function ensureFixedScale() {
+      if (fixedSpriteScale && isFinite(fixedSpriteScale) && fixedSpriteScale > 0) return;
+      fixedSpriteScale = null;
+      const base = getImage('orc_right_walk.png') || getImage('orc_left_walk.png');
+      if (!base || base.naturalHeight < 1) return;
+      const crop = cropTransparent(base);
+      fixedSpriteScale = BASE_RENDER_HEIGHT / safeSize(crop.sh, base.naturalHeight);
     }
 
     function loadAllImages() {
@@ -176,13 +192,13 @@
     }
 
     class Orc {
-      constructor(x, y, color, hpColor, enemy) {
+      constructor(x, y, color, name, enemy) {
         this.x = x;
         this.y = y;
         this.vx = 0;
         this.vy = 0;
         this.color = color;
-        this.hpColor = hpColor;
+        this.name = name;
         this.enemy = enemy;
         this.hp = MAX_HP;
         this.alive = true;
@@ -294,26 +310,23 @@
         return 'walk';
       }
 
-      getDrawCenter(bob) {
-        const img = this.getCurrentImage();
-        let ax = this.x;
-        let ay = this.y + bob;
-        if (img) {
-          const info = getSpriteDrawInfo(img);
-          const left = ax - info.anchorOffX;
-          const top = ay - info.anchorOffY;
-          const right = left + info.drawW;
-          const bottom = top + info.drawH;
-          let shiftX = 0;
-          let shiftY = 0;
-          if (left < VISUAL_PAD_X) shiftX = VISUAL_PAD_X - left;
-          if (right > ARENA_VIEW_SIZE - VISUAL_PAD_X) shiftX = (ARENA_VIEW_SIZE - VISUAL_PAD_X) - right;
-          if (top < VISUAL_PAD_Y) shiftY = VISUAL_PAD_Y - top;
-          if (bottom > ARENA_VIEW_SIZE - VISUAL_PAD_Y) shiftY = (ARENA_VIEW_SIZE - VISUAL_PAD_Y) - bottom;
-          ax += shiftX;
-          ay += shiftY;
+      getVisualShift(bob, info) {
+        if (!info) return { x: 0, y: 0 };
+        const ax = this.x;
+        const ay = this.y + bob;
+        const left = ax - info.anchorOffX;
+        const top = ay - info.anchorOffY;
+        let shiftX = 0;
+        let shiftY = 0;
+        if (left < VISUAL_PAD_X) shiftX = VISUAL_PAD_X - left;
+        else if (left + info.drawW > ARENA_VIEW_SIZE - VISUAL_PAD_X) {
+          shiftX = (ARENA_VIEW_SIZE - VISUAL_PAD_X - info.drawW) - left;
         }
-        return arenaToScreen(ax, ay);
+        if (top < VISUAL_PAD_Y) shiftY = VISUAL_PAD_Y - top;
+        else if (top + info.drawH > ARENA_VIEW_SIZE - VISUAL_PAD_Y) {
+          shiftY = (ARENA_VIEW_SIZE - VISUAL_PAD_Y - info.drawH) - top;
+        }
+        return { x: shiftX, y: shiftY };
       }
 
       setAttackPoseFromEnemy() {
@@ -353,52 +366,70 @@
       drawSprite() {
         const bob = (this.getPose() === 'walk' && this.alive)
           ? Math.sin(this.walkPhase) * WALK_BOB_AMPLITUDE : 0;
-        const screen = this.getDrawCenter(bob);
+        const body = arenaToScreen(this.x, this.y + bob);
         const img = this.getCurrentImage();
         let drawH = BASE_RENDER_HEIGHT;
 
         if (img) {
-          const info = getSpriteDrawInfo(img);
-          drawH = info.drawH;
-          ctx.drawImage(
-            img,
-            info.crop.sx, info.crop.sy, info.crop.sw, info.crop.sh,
-            screen.x - info.anchorOffX, screen.y - info.anchorOffY,
-            info.drawW, info.drawH
-          );
+          ensureFixedScale();
+          const fbScale = BASE_RENDER_HEIGHT / safeSize(img.naturalHeight, 100);
+          const scale = safeSize(fixedSpriteScale, fbScale);
+          let drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
+          drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
+          let drawX = body.x - drawW / 2;
+          let drawY = body.y - drawH * 0.52;
+
+          try {
+            const info = getSpriteDrawInfo(img);
+            const shift = this.getVisualShift(bob, info);
+            drawW = safeSize(info.drawW, drawW);
+            drawH = safeSize(info.drawH, drawH);
+            drawX = body.x - safeSize(info.anchorOffX, drawW / 2) + shift.x;
+            drawY = body.y - safeSize(info.anchorOffY, drawH * 0.52) + shift.y;
+            if (!isFinite(drawX)) drawX = body.x - drawW / 2;
+            if (!isFinite(drawY)) drawY = body.y - drawH * 0.52;
+            if (info.ok && info.crop.sw > 0 && info.crop.sh > 0) {
+              ctx.drawImage(
+                img,
+                info.crop.sx, info.crop.sy, info.crop.sw, info.crop.sh,
+                drawX, drawY, drawW, drawH
+              );
+            } else {
+              ctx.drawImage(img, drawX, drawY, drawW, drawH);
+            }
+          } catch (e) {
+            drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
+            drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
+            drawX = body.x - drawW / 2;
+            drawY = body.y - drawH * 0.52;
+            ctx.drawImage(img, drawX, drawY, drawW, drawH);
+          }
         } else {
           ctx.save();
           ctx.fillStyle = this.alive ? this.color : '#555';
           ctx.beginPath();
-          ctx.ellipse(screen.x, screen.y, HITBOX_RADIUS * 0.7, HITBOX_RADIUS, 0, 0, Math.PI * 2);
+          ctx.ellipse(body.x, body.y, HITBOX_RADIUS * 0.7, HITBOX_RADIUS, 0, 0, Math.PI * 2);
           ctx.fill();
           ctx.restore();
         }
 
-        return { screenX: screen.x, screenY: screen.y, drawH };
+        return { screenX: body.x, screenY: body.y, drawH };
       }
 
       drawHPBar(screenX, screenY, drawH) {
         if (!this.alive) return;
         const w = 58;
-        const h = 12;
-        const barY = screenY - drawH / 2 - 16;
+        const h = 8;
+        const barY = screenY - drawH / 2 - 14;
         const pct = this.hp / MAX_HP;
 
         ctx.fillStyle = '#000';
         ctx.fillRect(screenX - w / 2, barY, w, h);
         ctx.fillStyle = '#4caf50';
         ctx.fillRect(screenX - w / 2, barY, w * pct, h);
-        ctx.strokeStyle = '#ccc';
+        ctx.strokeStyle = '#888';
         ctx.lineWidth = 1;
         ctx.strokeRect(screenX - w / 2, barY, w, h);
-
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 9px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(Math.ceil(this.hp) + ' / ' + MAX_HP, screenX, barY + h / 2);
-        ctx.textBaseline = 'alphabetic';
       }
     }
 
@@ -445,6 +476,22 @@
         a.setAttackPoseFromEnemy();
         b.setAttackPoseFromEnemy();
       }
+    }
+
+    function drawBottomHPBar(x, y, w, hp, label) {
+      const h = 24;
+      const pct = hp / MAX_HP;
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(label + '  ' + Math.ceil(hp) + ' / ' + MAX_HP, x, y - 4);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = '#4caf50';
+      ctx.fillRect(x, y, w * pct, h);
+      ctx.strokeStyle = '#ccc';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
     }
 
     function drawFixedUI() {
@@ -509,6 +556,11 @@
       ctx.strokeStyle = '#c8b8d8';
       ctx.lineWidth = 2;
       ctx.strokeRect(VIEW_LEFT + 3, VIEW_TOP + 3, ARENA_VIEW_SIZE - 6, ARENA_VIEW_SIZE - 6);
+
+      const bottomY = VIEW_TOP + ARENA_VIEW_SIZE + 36;
+      const barW = 220;
+      drawBottomHPBar(24, bottomY, barW, orcA.hp, 'Green Orc');
+      drawBottomHPBar(GAME_WIDTH - 24 - barW, bottomY, barW, orcB.hp, 'Orange Orc');
     }
 
     let orcA, orcB;
@@ -516,8 +568,8 @@
 
     function initGame() {
       const mid = ARENA_VIEW_SIZE / 2;
-      orcA = new Orc(mid - 100, mid, '#3d8b5e', '#4caf50');
-      orcB = new Orc(mid + 100, mid, '#c45c26', '#e8944a');
+      orcA = new Orc(mid - 100, mid, '#3d8b5e', 'Green Orc');
+      orcB = new Orc(mid + 100, mid, '#c45c26', 'Orange Orc');
       orcA.enemy = orcB;
       orcB.enemy = orcA;
       orcA.giveInitialVelocity();
