@@ -10,7 +10,7 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: #000;
+      background: #0e0a16;
     }
     body {
       display: flex;
@@ -18,7 +18,7 @@
       align-items: center;
       font-family: 'Segoe UI', Arial, sans-serif;
     }
-    canvas { display: block; background: #000; }
+    canvas { display: block; background: #100b1c; }
   </style>
 </head>
 <body>
@@ -41,7 +41,7 @@
     const arenaBottom      = ARENA_VIEW_SIZE;
     const visualArenaTop   = arenaTop - ARENA_VISUAL_EXTRA_Y;
     const visualArenaBottom = arenaBottom + ARENA_VISUAL_EXTRA_Y;
-    const HP_BAR_OFFSET_Y  = HITBOX_RADIUS + 24;
+    const HP_BAR_OFFSET_Y  = HITBOX_RADIUS + 36;
 
     const UNIT_SPEED          = 220;
     const MIN_WALL_BOUNCE     = UNIT_SPEED * 0.55;
@@ -482,7 +482,7 @@
     function drawBottomHPBar(x, y, w, hp, label) {
       const h = 24;
       const pct = hp / MAX_HP;
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = '#f2ecff';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(label + '  ' + Math.ceil(hp) + ' / ' + MAX_HP, x, y - 4);
@@ -490,29 +490,27 @@
       ctx.fillRect(x, y, w, h);
       ctx.fillStyle = '#4caf50';
       ctx.fillRect(x, y, w * pct, h);
-      ctx.strokeStyle = '#ccc';
+      ctx.strokeStyle = '#d8ccf0';
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, w, h);
     }
 
     function drawFixedUI() {
-      ctx.fillStyle = '#08080c';
+      ctx.fillStyle = '#151020';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-      ctx.fillStyle = '#e8e0d0';
+      ctx.fillStyle = '#f2ecff';
       ctx.font = 'bold 38px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('ORC BATTLE', GAME_WIDTH / 2, 46);
 
       ctx.font = 'bold 14px sans-serif';
-      ctx.fillStyle = '#6ecf6e';
+      ctx.fillStyle = '#c7b8e8';
       ctx.fillText('GREEN ORC', GAME_WIDTH / 2 - 72, 82);
-      ctx.fillStyle = '#ccc';
       ctx.fillText('VS', GAME_WIDTH / 2, 82);
-      ctx.fillStyle = '#e8944a';
       ctx.fillText('ORANGE ORC', GAME_WIDTH / 2 + 72, 82);
 
-      ctx.fillStyle = '#444';
+      ctx.fillStyle = '#c7b8e8';
       ctx.font = '11px sans-serif';
       ctx.fillText('Press R to restart', GAME_WIDTH / 2, GAME_HEIGHT - 12);
     }
@@ -526,11 +524,11 @@
       ctx.rect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
       ctx.clip();
 
-      ctx.fillStyle = '#2a2236';
+      ctx.fillStyle = '#2a2138';
       ctx.fillRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
 
       const tile = 60;
-      ctx.strokeStyle = 'rgba(90,70,110,0.25)';
+      ctx.strokeStyle = 'rgba(190, 160, 255, 0.08)';
       ctx.lineWidth = 1;
       for (let x = 0; x <= ARENA_VIEW_SIZE; x += tile) {
         const sx = VIEW_LEFT + x;
@@ -555,12 +553,16 @@
       orcA.drawHeadHPBar();
       orcB.drawHeadHPBar();
 
-      ctx.strokeStyle = '#7a6490';
+      ctx.strokeStyle = '#a98ee8';
       ctx.lineWidth = 5;
       ctx.strokeRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
-      ctx.strokeStyle = '#c8b8d8';
+      ctx.strokeStyle = '#b89cff';
       ctx.lineWidth = 2;
       ctx.strokeRect(VIEW_LEFT + 3, visTop + 3, ARENA_VIEW_SIZE - 6, visH - 6);
+
+      const visBottom = VIEW_TOP + ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y;
+      ctx.fillStyle = '#140f20';
+      ctx.fillRect(0, visBottom, GAME_WIDTH, GAME_HEIGHT - visBottom);
 
       const bottomY = VIEW_TOP + ARENA_VIEW_SIZE + 36;
       const barW = 220;
@@ -595,9 +597,9 @@
       if (!orcA.alive || !orcB.alive) {
         const winner = orcA.alive ? 'GREEN ORC WINS!' :
                        orcB.alive ? 'ORANGE ORC WINS!' : 'DRAW!';
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillStyle = 'rgba(14, 10, 22, 0.65)';
         ctx.fillRect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
-        ctx.fillStyle = '#f0e8d8';
+        ctx.fillStyle = '#f2ecff';
         ctx.font = 'bold 26px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(winner, GAME_WIDTH / 2, VIEW_TOP + ARENA_VIEW_SIZE / 2);
