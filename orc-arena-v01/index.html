@@ -56,6 +56,11 @@
     const WALK_BOB_SPEED     = 10;
     const CLOSE_RANGE        = 95;
     const READY_DISPLAY_TIME = 0.5;
+
+    const CAMERA_PAN_STRENGTH = 0.08;
+    const CAMERA_LERP         = 0.06;
+    const MAX_CAMERA_PAN      = 18;
+    const camera = { x: 0, y: 0, zoom: 1, shakeTime: 0, shakePower: 0, hitZoom: 0 };
     // ──────────────────────────────────────────────────────────────────────
 
     const canvas = document.getElementById('game');
@@ -208,6 +213,74 @@
 
     function arenaToScreen(ax, ay) {
       return { x: VIEW_LEFT + ax, y: VIEW_TOP + ay };
+    }
+
+    function safeCamera() {
+      if (!Number.isFinite(camera.x)) camera.x = 0;
+      if (!Number.isFinite(camera.y)) camera.y = 0;
+      if (!Number.isFinite(camera.zoom) || camera.zoom <= 0) camera.zoom = 1;
+      camera.x = Math.max(-MAX_CAMERA_PAN, Math.min(MAX_CAMERA_PAN, camera.x));
+      camera.y = Math.max(-MAX_CAMERA_PAN, Math.min(MAX_CAMERA_PAN, camera.y));
+      camera.zoom = Math.min(1.08, Math.max(1, camera.zoom));
+    }
+
+    function triggerHitCamera() {
+      camera.shakeTime = 0.15;
+      camera.shakePower = 4;
+      camera.hitZoom = 0.05;
+    }
+
+    function triggerDeathCamera() {
+      camera.shakeTime = 0.2;
+      camera.shakePower = 6;
+      camera.hitZoom = 0.08;
+    }
+
+    function updateCamera(dt, a, b) {
+      const midX = (a.x + b.x) * 0.5;
+      const midY = (a.y + b.y) * 0.5;
+      const arenaMid = ARENA_VIEW_SIZE * 0.5;
+      const targetPanX = Math.max(-MAX_CAMERA_PAN, Math.min(MAX_CAMERA_PAN, (midX - arenaMid) * CAMERA_PAN_STRENGTH));
+      const targetPanY = Math.max(-MAX_CAMERA_PAN, Math.min(MAX_CAMERA_PAN, (midY - arenaMid) * CAMERA_PAN_STRENGTH));
+      camera.x += (targetPanX - camera.x) * CAMERA_LERP;
+      camera.y += (targetPanY - camera.y) * CAMERA_LERP;
+
+      let targetZoom = 1.0;
+      if (a.alive && b.alive) {
+        const dist = Math.hypot(b.x - a.x, b.y - a.y);
+        if (dist < CLOSE_RANGE) targetZoom = 1.0 + (1 - dist / CLOSE_RANGE) * 0.03;
+      }
+      targetZoom = Math.min(1.08, targetZoom + camera.hitZoom);
+      camera.zoom += (targetZoom - camera.zoom) * 0.08;
+
+      camera.hitZoom = Math.max(0, camera.hitZoom - dt * 0.35);
+      camera.shakeTime = Math.max(0, camera.shakeTime - dt);
+      safeCamera();
+    }
+
+    function applyCameraTransform() {
+      const cx = VIEW_LEFT + ARENA_VIEW_SIZE / 2;
+      const cy = VIEW_TOP + ARENA_VIEW_SIZE / 2;
+      let shakeX = 0;
+      let shakeY = 0;
+      if (camera.shakeTime > 0) {
+        const fade = camera.shakeTime / 0.2;
+        const p = camera.shakePower * fade;
+        shakeX = (Math.random() - 0.5) * 2 * p;
+        shakeY = (Math.random() - 0.5) * 2 * p;
+      }
+      ctx.translate(cx, cy);
+      ctx.scale(camera.zoom, camera.zoom);
+      ctx.translate(-cx + camera.x + shakeX, -cy + camera.y + shakeY);
+    }
+
+    function resetCamera() {
+      camera.x = 0;
+      camera.y = 0;
+      camera.zoom = 1;
+      camera.shakeTime = 0;
+      camera.shakePower = 0;
+      camera.hitZoom = 0;
     }
 
     function clampArena(v) {
@@ -485,6 +558,8 @@
       a.applyAntiStuck();
       b.applyAntiStuck();
 
+      const aAliveBefore = a.alive;
+      const bAliveBefore = b.alive;
       const aDamaged = a.takeDamage(DAMAGE);
       const bDamaged = b.takeDamage(DAMAGE);
       if (aDamaged || bDamaged) {
@@ -492,7 +567,9 @@
         b.lockFacingOnHit();
         a.setAttackPoseFromEnemy();
         b.setAttackPoseFromEnemy();
+        triggerHitCamera();
       }
+      if ((aAliveBefore && !a.alive) || (bAliveBefore && !b.alive)) triggerDeathCamera();
     }
 
     function drawBottomHPBar(x, y, w, hp, label) {
@@ -534,6 +611,13 @@
     function drawArenaWorld() {
       const visTop = VIEW_TOP - ARENA_VISUAL_EXTRA_Y;
       const visH = ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y * 2;
+      const visBottom = VIEW_TOP + ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y;
+
+      ctx.fillStyle = '#140f20';
+      ctx.fillRect(0, visBottom, GAME_WIDTH, GAME_HEIGHT - visBottom);
+
+      ctx.save();
+      applyCameraTransform();
 
       ctx.save();
       ctx.beginPath();
@@ -576,9 +660,7 @@
       ctx.lineWidth = 2;
       ctx.strokeRect(VIEW_LEFT + 3, visTop + 3, ARENA_VIEW_SIZE - 6, visH - 6);
 
-      const visBottom = VIEW_TOP + ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y;
-      ctx.fillStyle = '#140f20';
-      ctx.fillRect(0, visBottom, GAME_WIDTH, GAME_HEIGHT - visBottom);
+      ctx.restore();
 
       const bottomY = VIEW_TOP + ARENA_VIEW_SIZE + 36;
       const barW = 220;
@@ -597,6 +679,7 @@
       orcB.enemy = orcA;
       orcA.giveInitialVelocity();
       orcB.giveInitialVelocity();
+      resetCamera();
     }
 
     function gameLoop(timestamp) {
@@ -606,6 +689,7 @@
       orcA.update(dt);
       orcB.update(dt);
       resolveBodyCollision(orcA, orcB);
+      updateCamera(dt, orcA, orcB);
 
       drawFixedUI();
       drawArenaWorld();
