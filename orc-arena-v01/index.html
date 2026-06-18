@@ -33,14 +33,15 @@
     const VIEW_LEFT        = (GAME_WIDTH - ARENA_VIEW_SIZE) / 2;
     const VIEW_TOP         = 108;
     const ARENA_VISUAL_EXTRA_Y = 18;
+
+    const BASE_RENDER_HEIGHT   = 130;
+    const HITBOX_RADIUS        = 32;
+
     const arenaTop         = 0;
     const arenaBottom      = ARENA_VIEW_SIZE;
     const visualArenaTop   = arenaTop - ARENA_VISUAL_EXTRA_Y;
     const visualArenaBottom = arenaBottom + ARENA_VISUAL_EXTRA_Y;
     const HP_BAR_OFFSET_Y  = HITBOX_RADIUS + 24;
-
-    const BASE_RENDER_HEIGHT   = 130;
-    const HITBOX_RADIUS        = 32;
 
     const UNIT_SPEED          = 220;
     const MIN_WALL_BOUNCE     = UNIT_SPEED * 0.55;
@@ -382,7 +383,13 @@
             drawY = center.y - safeSize(info.anchorOffY, drawH * 0.52);
             if (!isFinite(drawX)) drawX = center.x - drawW / 2;
             if (!isFinite(drawY)) drawY = center.y - drawH * 0.52;
-            if (info.ok && info.crop.sw > 0 && info.crop.sh > 0) {
+            if (!Number.isFinite(drawX) || !Number.isFinite(drawY) || !Number.isFinite(drawW) || !Number.isFinite(drawH) || drawW <= 0 || drawH <= 0) {
+              drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
+              drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
+              drawX = center.x - drawW / 2;
+              drawY = center.y - drawH * 0.52;
+              ctx.drawImage(img, drawX, drawY, drawW, drawH);
+            } else if (info.ok && info.crop.sw > 0 && info.crop.sh > 0) {
               ctx.drawImage(
                 img,
                 info.crop.sx, info.crop.sy, info.crop.sw, info.crop.sh,
