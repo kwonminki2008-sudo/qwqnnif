@@ -32,6 +32,12 @@
     const ARENA_VIEW_SIZE  = 500;
     const VIEW_LEFT        = (GAME_WIDTH - ARENA_VIEW_SIZE) / 2;
     const VIEW_TOP         = 108;
+    const ARENA_VISUAL_EXTRA_Y = 18;
+    const arenaTop         = 0;
+    const arenaBottom      = ARENA_VIEW_SIZE;
+    const visualArenaTop   = arenaTop - ARENA_VISUAL_EXTRA_Y;
+    const visualArenaBottom = arenaBottom + ARENA_VISUAL_EXTRA_Y;
+    const HP_BAR_OFFSET_Y  = HITBOX_RADIUS + 24;
 
     const BASE_RENDER_HEIGHT   = 130;
     const HITBOX_RADIUS        = 32;
@@ -408,9 +414,9 @@
         const barW = 52;
         const barH = 7;
         let hpX = this.x - barW / 2;
-        let hpY = this.y - HITBOX_RADIUS - 18;
+        let hpY = this.y - HP_BAR_OFFSET_Y;
         hpX = Math.max(4, Math.min(hpX, ARENA_VIEW_SIZE - barW - 4));
-        hpY = Math.max(6, hpY);
+        hpY = Math.max(visualArenaTop + 6, hpY);
         const sx = VIEW_LEFT + hpX;
         const sy = VIEW_TOP + hpY;
         const pct = this.hp / MAX_HP;
@@ -505,13 +511,16 @@
     }
 
     function drawArenaWorld() {
+      const visTop = VIEW_TOP - ARENA_VISUAL_EXTRA_Y;
+      const visH = ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y * 2;
+
       ctx.save();
       ctx.beginPath();
-      ctx.rect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
+      ctx.rect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
       ctx.clip();
 
       ctx.fillStyle = '#2a2236';
-      ctx.fillRect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
+      ctx.fillRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
 
       const tile = 60;
       ctx.strokeStyle = 'rgba(90,70,110,0.25)';
@@ -519,11 +528,11 @@
       for (let x = 0; x <= ARENA_VIEW_SIZE; x += tile) {
         const sx = VIEW_LEFT + x;
         ctx.beginPath();
-        ctx.moveTo(sx, VIEW_TOP);
-        ctx.lineTo(sx, VIEW_TOP + ARENA_VIEW_SIZE);
+        ctx.moveTo(sx, visTop);
+        ctx.lineTo(sx, visTop + visH);
         ctx.stroke();
       }
-      for (let y = 0; y <= ARENA_VIEW_SIZE; y += tile) {
+      for (let y = -ARENA_VISUAL_EXTRA_Y; y <= ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y; y += tile) {
         const sy = VIEW_TOP + y;
         ctx.beginPath();
         ctx.moveTo(VIEW_LEFT, sy);
@@ -541,10 +550,10 @@
 
       ctx.strokeStyle = '#7a6490';
       ctx.lineWidth = 5;
-      ctx.strokeRect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
+      ctx.strokeRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
       ctx.strokeStyle = '#c8b8d8';
       ctx.lineWidth = 2;
-      ctx.strokeRect(VIEW_LEFT + 3, VIEW_TOP + 3, ARENA_VIEW_SIZE - 6, ARENA_VIEW_SIZE - 6);
+      ctx.strokeRect(VIEW_LEFT + 3, visTop + 3, ARENA_VIEW_SIZE - 6, visH - 6);
 
       const bottomY = VIEW_TOP + ARENA_VIEW_SIZE + 36;
       const barW = 220;
