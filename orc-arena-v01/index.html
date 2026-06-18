@@ -46,6 +46,9 @@
     const WALK_BOB_AMPLITUDE = 3;
     const WALK_BOB_SPEED     = 10;
     const CLOSE_RANGE        = 95;
+    const READY_DISPLAY_TIME = 0.5;
+    const VISUAL_PAD_X       = 8;
+    const VISUAL_PAD_Y       = 12;
     // ──────────────────────────────────────────────────────────────────────
 
     const canvas = document.getElementById('game');
@@ -134,6 +137,9 @@
         this.faceLockTime = 0;
         this.attackTimer = 0;
         this.attackPose = 'attack_forward';
+        this.readyTimer = 0;
+        this.readyPose = 'weapon_ready';
+        this.inCloseRange = false;
         this.walkPhase = Math.random() * Math.PI * 2;
       }
 
@@ -186,6 +192,7 @@
         this.damageCooldown = Math.max(0, this.damageCooldown - dt);
         this.faceLockTime = Math.max(0, this.faceLockTime - dt);
         if (this.attackTimer > 0) this.attackTimer -= dt;
+        if (this.readyTimer > 0) this.readyTimer -= dt;
 
         this.x += this.vx * dt;
         this.y += this.vy * dt;
@@ -209,12 +216,30 @@
         const edx = this.enemy.x - this.x;
         const edy = this.enemy.y - this.y;
         const dist = Math.hypot(edx, edy);
+        const inRange = dist < CLOSE_RANGE && this.enemy.alive;
 
-        if (dist < CLOSE_RANGE && this.enemy.alive) {
-          if (edy > 20 && Math.abs(edx) < edy * 1.2) return 'kick_ready';
-          return 'weapon_ready';
+        if (inRange && !this.inCloseRange) {
+          this.readyPose = (edy > 20 && Math.abs(edx) < edy * 1.2) ? 'kick_ready' : 'weapon_ready';
+          this.readyTimer = READY_DISPLAY_TIME;
         }
+        this.inCloseRange = inRange;
+
+        if (this.readyTimer > 0) return this.readyPose;
         return 'walk';
+      }
+
+      getDrawCenter(bob) {
+        const img = this.getCurrentImage();
+        let ax = this.x;
+        let ay = this.y + bob;
+        if (img) {
+          const { drawW, drawH } = getSpriteDrawSize(img);
+          const halfW = drawW * 0.5 + VISUAL_PAD_X;
+          const halfH = drawH * 0.5 + VISUAL_PAD_Y;
+          ax = Math.max(halfW, Math.min(ARENA_VIEW_SIZE - halfW, ax));
+          ay = Math.max(halfH, Math.min(ARENA_VIEW_SIZE - halfH, ay));
+        }
+        return arenaToScreen(ax, ay);
       }
 
       setAttackPoseFromEnemy() {
@@ -254,7 +279,7 @@
       drawSprite() {
         const bob = (this.getPose() === 'walk' && this.alive)
           ? Math.sin(this.walkPhase) * WALK_BOB_AMPLITUDE : 0;
-        const screen = arenaToScreen(this.x, this.y + bob);
+        const screen = this.getDrawCenter(bob);
         const img = this.getCurrentImage();
         let drawH = SPRITE_TARGET_HEIGHT;
 
@@ -277,24 +302,24 @@
       drawHPBar(screenX, screenY, drawH) {
         if (!this.alive) return;
         const w = 58;
-        const h = 9;
+        const h = 12;
         const barY = screenY - drawH / 2 - 16;
         const pct = this.hp / MAX_HP;
 
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(screenX - w / 2 - 1, barY - 13, w + 2, h + 14);
-        ctx.fillStyle = '#1a1a1a';
+        ctx.fillStyle = '#000';
         ctx.fillRect(screenX - w / 2, barY, w, h);
-        ctx.fillStyle = this.hpColor;
+        ctx.fillStyle = '#4caf50';
         ctx.fillRect(screenX - w / 2, barY, w * pct, h);
         ctx.strokeStyle = '#ccc';
         ctx.lineWidth = 1;
         ctx.strokeRect(screenX - w / 2, barY, w, h);
 
         ctx.fillStyle = '#fff';
-        ctx.font = 'bold 10px sans-serif';
+        ctx.font = 'bold 9px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(Math.ceil(this.hp) + '/' + MAX_HP, screenX, barY - 3);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(Math.ceil(this.hp) + ' / ' + MAX_HP, screenX, barY + h / 2);
+        ctx.textBaseline = 'alphabetic';
       }
     }
 
