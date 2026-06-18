@@ -524,7 +524,7 @@
     }
 
     function resolveBodyCollision(a, b) {
-      if (!a.alive || !b.alive) return;
+      if (!a.alive || !b.alive || a.hp <= 0 || b.hp <= 0) return;
 
       const dx = b.x - a.x;
       const dy = b.y - a.y;
@@ -572,26 +572,16 @@
       if ((aAliveBefore && !a.alive) || (bAliveBefore && !b.alive)) triggerDeathCamera();
     }
 
-    function drawBottomHPBar(x, y, w, hp, label) {
-      const h = 24;
-      const pct = hp / MAX_HP;
+    function drawBottomHPText(y) {
       ctx.fillStyle = '#f2ecff';
-      ctx.font = 'bold 12px sans-serif';
+      ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(label + '  ' + Math.ceil(hp) + ' / ' + MAX_HP, x, y - 4);
-      ctx.fillStyle = '#000';
-      ctx.fillRect(x, y, w, h);
-      ctx.fillStyle = '#4caf50';
-      ctx.fillRect(x, y, w * pct, h);
-      ctx.strokeStyle = '#d8ccf0';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x, y, w, h);
+      ctx.fillText('Green Orc  ' + Math.ceil(orcA.hp) + ' / ' + MAX_HP, 24, y);
+      ctx.textAlign = 'right';
+      ctx.fillText('Orange Orc  ' + Math.ceil(orcB.hp) + ' / ' + MAX_HP, GAME_WIDTH - 24, y);
     }
 
-    function drawFixedUI() {
-      ctx.fillStyle = '#151020';
-      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
+    function drawCameraUI() {
       ctx.fillStyle = '#f2ecff';
       ctx.font = 'bold 38px sans-serif';
       ctx.textAlign = 'center';
@@ -602,9 +592,15 @@
       ctx.fillText('GREEN ORC', GAME_WIDTH / 2 - 72, 82);
       ctx.fillText('VS', GAME_WIDTH / 2, 82);
       ctx.fillText('ORANGE ORC', GAME_WIDTH / 2 + 72, 82);
+    }
+
+    function drawFixedUI() {
+      ctx.fillStyle = '#151020';
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
       ctx.fillStyle = '#c7b8e8';
       ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
       ctx.fillText('Press R to restart', GAME_WIDTH / 2, GAME_HEIGHT - 12);
     }
 
@@ -613,11 +609,13 @@
       const visH = ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y * 2;
       const visBottom = VIEW_TOP + ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y;
 
-      ctx.fillStyle = '#140f20';
-      ctx.fillRect(0, visBottom, GAME_WIDTH, GAME_HEIGHT - visBottom);
-
       ctx.save();
       applyCameraTransform();
+
+      drawCameraUI();
+
+      ctx.fillStyle = '#140f20';
+      ctx.fillRect(0, visBottom, GAME_WIDTH, GAME_HEIGHT - visBottom);
 
       ctx.save();
       ctx.beginPath();
@@ -660,12 +658,9 @@
       ctx.lineWidth = 2;
       ctx.strokeRect(VIEW_LEFT + 3, visTop + 3, ARENA_VIEW_SIZE - 6, visH - 6);
 
-      ctx.restore();
+      drawBottomHPText(VIEW_TOP + ARENA_VIEW_SIZE + 36);
 
-      const bottomY = VIEW_TOP + ARENA_VIEW_SIZE + 36;
-      const barW = 220;
-      drawBottomHPBar(24, bottomY, barW, orcA.hp, 'Green Orc');
-      drawBottomHPBar(GAME_WIDTH - 24 - barW, bottomY, barW, orcB.hp, 'Orange Orc');
+      ctx.restore();
     }
 
     let orcA, orcB;
@@ -693,17 +688,6 @@
 
       drawFixedUI();
       drawArenaWorld();
-
-      if (!orcA.alive || !orcB.alive) {
-        const winner = orcA.alive ? 'GREEN ORC WINS!' :
-                       orcB.alive ? 'ORANGE ORC WINS!' : 'DRAW!';
-        ctx.fillStyle = 'rgba(14, 10, 22, 0.65)';
-        ctx.fillRect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
-        ctx.fillStyle = '#f2ecff';
-        ctx.font = 'bold 26px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(winner, GAME_WIDTH / 2, VIEW_TOP + ARENA_VIEW_SIZE / 2);
-      }
 
       requestAnimationFrame(gameLoop);
     }
