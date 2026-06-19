@@ -10,7 +10,7 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: #0e0a16;
+      background: #f1f2f5;
     }
     body {
       display: flex;
@@ -19,7 +19,7 @@
       font-family: 'Segoe UI', Arial, sans-serif;
     }
     #game-wrap { transform-origin: center center; }
-    canvas { display: block; background: #100b1c; }
+    canvas { display: block; background: #f7f8fb; }
   </style>
 </head>
 <body>
@@ -70,7 +70,7 @@
     const CHARACTERS = {
       orc: {
         id: 'orc', displayName: 'Orc', path: 'assets/sprites/orc/',
-        maxHp: 100, damage: 8,
+        maxHp: 100, damage: 10, damageColor: '#36d46b',
         files: [
           'orc_left_idle.png','orc_left_walk.png','orc_left_weapon_ready.png',
           'orc_left_kick_ready.png','orc_left_attack_forward.png','orc_left_attack_up.png',
@@ -87,7 +87,7 @@
       },
       hammer: {
         id: 'hammer', displayName: 'Hammer Mage', path: 'assets/sprites/hammer/',
-        maxHp: 60, damage: 7,
+        maxHp: 60, damage: 7, damageColor: '#ffd84a',
         files: [
           'hammer_left_idle.png','hammer_left_walk.png','hammer_left_weapon_ready.png',
           'hammer_left_attack_forward.png','hammer_left_attack_up.png','hammer_left_attack_diag_up.png',
@@ -126,6 +126,7 @@
     let fighterA = null;
     let fighterB = null;
     let electricEffects = [];
+    let damagePopups = [];
     let lastTime = 0;
 
     function cropTransparent(img) {
@@ -227,6 +228,43 @@
       }
       const k = target / s;
       return { vx: vx * k, vy: vy * k };
+    }
+
+    function spawnDamagePopup(target, value, color) {
+      if (value <= 0) return;
+      damagePopups.push({
+        x: target.x + (Math.random() - 0.5) * 16,
+        y: target.y - HITBOX_RADIUS,
+        value: Math.round(value),
+        color,
+        life: 0.7,
+        maxLife: 0.7
+      });
+    }
+
+    function updateDamagePopups(dt) {
+      for (const p of damagePopups) {
+        p.life -= dt;
+        p.y -= 40 * dt;
+      }
+      damagePopups = damagePopups.filter(p => p.life > 0);
+    }
+
+    function drawDamagePopups() {
+      for (const p of damagePopups) {
+        const alpha = Math.max(0, p.life / p.maxLife);
+        const sp = arenaToScreen(p.x, p.y);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold 18px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        ctx.lineWidth = 3;
+        ctx.strokeText(String(p.value), sp.x, sp.y);
+        ctx.fillStyle = p.color;
+        ctx.fillText(String(p.value), sp.x, sp.y);
+        ctx.restore();
+      }
     }
 
     function arenaToScreen(ax, ay) {
@@ -467,7 +505,7 @@
       }
 
       takeDamage(amount) {
-        if (!this.alive || this.damageCooldown > 0) return false;
+        if (!this.alive || this.damageCooldown > 0) return 0;
         let dmg = amount;
         if (this.isParalyzed()) dmg *= 2;
         this.hp -= dmg;
@@ -480,7 +518,7 @@
           this.paralyzeTimer = 0;
           if (this.charId === 'hammer') this.skillPhase = 'none';
         }
-        return true;
+        return dmg;
       }
 
       drawSprite() {
@@ -559,7 +597,8 @@
         const dy = this.target.y - this.y;
         const dist = Math.hypot(dx, dy);
         if (dist < HITBOX_RADIUS) {
-          this.target.takeDamage(HAMMER_SKILL_DAMAGE);
+          const dmg = this.target.takeDamage(HAMMER_SKILL_DAMAGE);
+          if (dmg > 0) spawnDamagePopup(this.target, dmg, CHARACTERS.hammer.damageColor);
           this.target.applyParalyze(PARALYZE_DURATION);
           this.alive = false;
           this.owner.onSkillComplete();
@@ -574,7 +613,7 @@
         const img = getImage('assets/sprites/hammer/hammer_electric_effect.png');
         if (img) ctx.drawImage(img, p.x - ELECTRIC_SIZE / 2, p.y - ELECTRIC_SIZE / 2, ELECTRIC_SIZE, ELECTRIC_SIZE);
         else {
-          ctx.fillStyle = '#88f';
+          ctx.fillStyle = '#ffd84a';
           ctx.beginPath();
           ctx.arc(p.x, p.y, ELECTRIC_SIZE / 2, 0, Math.PI * 2);
           ctx.fill();
@@ -671,7 +710,9 @@
         const bn = normalizeSpeed(b.vx, b.vy, UNIT_SPEED);
         b.vx = bn.vx; b.vy = bn.vy;
         b.applyAntiStuck();
-        if (a.takeDamage(b.damage)) {
+        const dmg = a.takeDamage(b.damage);
+        if (dmg > 0) {
+          spawnDamagePopup(a, dmg, b.cfg.damageColor);
           b.lockFacingOnHit();
           if (b.skillPhase === 'none') b.setAttackPoseFromEnemy();
           triggerHitScreenCamera();
@@ -690,7 +731,9 @@
         const an = normalizeSpeed(a.vx, a.vy, UNIT_SPEED);
         a.vx = an.vx; a.vy = an.vy;
         a.applyAntiStuck();
-        if (b.takeDamage(a.damage)) {
+        const dmg = b.takeDamage(a.damage);
+        if (dmg > 0) {
+          spawnDamagePopup(b, dmg, a.cfg.damageColor);
           a.lockFacingOnHit();
           if (a.skillPhase === 'none') a.setAttackPoseFromEnemy();
           triggerHitScreenCamera();
@@ -722,9 +765,11 @@
 
       const aAliveBefore = a.alive;
       const bAliveBefore = b.alive;
-      const aDamaged = a.takeDamage(b.damage);
-      const bDamaged = b.takeDamage(a.damage);
-      if (aDamaged || bDamaged) {
+      const aDmg = a.takeDamage(b.damage);
+      const bDmg = b.takeDamage(a.damage);
+      if (aDmg > 0) spawnDamagePopup(a, aDmg, b.cfg.damageColor);
+      if (bDmg > 0) spawnDamagePopup(b, bDmg, a.cfg.damageColor);
+      if (aDmg > 0 || bDmg > 0) {
         a.lockFacingOnHit();
         b.lockFacingOnHit();
         if (a.skillPhase === 'none') a.setAttackPoseFromEnemy();
@@ -740,25 +785,28 @@
     }
 
     function drawSelectScreen() {
-      ctx.fillStyle = '#151020';
+      ctx.fillStyle = '#f7f8fb';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-      ctx.fillStyle = '#f2ecff';
+      ctx.fillStyle = '#1f2430';
       ctx.font = 'bold 32px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('ARENA BATTLE SIMULATOR', GAME_WIDTH / 2, 70);
       ctx.font = 'bold 16px sans-serif';
-      ctx.fillStyle = '#c7b8e8';
+      ctx.fillStyle = '#555e70';
       ctx.fillText('CHARACTER SELECT', GAME_WIDTH / 2, 105);
-      ctx.fillStyle = '#4caf50';
+      ctx.fillStyle = CHARACTERS[p1Choice].damageColor;
       ctx.fillText('P1: ' + CHARACTERS[p1Choice].displayName, GAME_WIDTH / 2, 200);
-      ctx.fillStyle = '#e8944a';
+      ctx.fillStyle = CHARACTERS[p2Choice].damageColor;
       ctx.fillText('P2: ' + CHARACTERS[p2Choice].displayName, GAME_WIDTH / 2, 250);
-      ctx.fillStyle = '#a98ee8';
+      ctx.fillStyle = '#e8ebf0';
       ctx.fillRect(120, 420, 300, 48);
-      ctx.fillStyle = '#f2ecff';
+      ctx.strokeStyle = '#8c94a3';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(120, 420, 300, 48);
+      ctx.fillStyle = '#1f2430';
       ctx.font = 'bold 16px sans-serif';
       ctx.fillText('START BATTLE', GAME_WIDTH / 2, 450);
-      ctx.fillStyle = '#c7b8e8';
+      ctx.fillStyle = '#555e70';
       ctx.font = '13px sans-serif';
       const hints = [
         'P1: A/D or tap left side',
@@ -778,7 +826,7 @@
 
     function drawBottomHPText(y) {
       if (!fighterA || !fighterB) return;
-      ctx.fillStyle = '#f2ecff';
+      ctx.fillStyle = '#1f2430';
       ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(fighterA.name + '  ' + Math.ceil(fighterA.hp) + ' / ' + fighterA.maxHp, 24, y);
@@ -787,23 +835,23 @@
     }
 
     function drawFixedUI() {
-      ctx.fillStyle = '#151020';
+      ctx.fillStyle = '#f7f8fb';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-      ctx.fillStyle = '#f2ecff';
+      ctx.fillStyle = '#1f2430';
       ctx.font = 'bold 30px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('ARENA BATTLE SIMULATOR', GAME_WIDTH / 2, 46);
 
       ctx.font = 'bold 13px sans-serif';
-      ctx.fillStyle = '#4caf50';
+      ctx.fillStyle = fighterA.cfg.damageColor;
       ctx.fillText(fighterA.name.toUpperCase(), GAME_WIDTH / 2 - 90, 82);
-      ctx.fillStyle = '#c7b8e8';
+      ctx.fillStyle = '#555e70';
       ctx.fillText('VS', GAME_WIDTH / 2, 82);
-      ctx.fillStyle = '#e8944a';
+      ctx.fillStyle = fighterB.cfg.damageColor;
       ctx.fillText(fighterB.name.toUpperCase(), GAME_WIDTH / 2 + 90, 82);
 
-      ctx.fillStyle = '#c7b8e8';
+      ctx.fillStyle = '#555e70';
       ctx.font = '11px sans-serif';
       ctx.fillText('R: Restart   Esc: Select', GAME_WIDTH / 2, GAME_HEIGHT - 12);
     }
@@ -817,11 +865,11 @@
       ctx.rect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
       ctx.clip();
 
-      ctx.fillStyle = '#2a2138';
+      ctx.fillStyle = '#f8f9fb';
       ctx.fillRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
 
       const tile = 60;
-      ctx.strokeStyle = 'rgba(190, 160, 255, 0.08)';
+      ctx.strokeStyle = 'rgba(120, 130, 150, 0.28)';
       ctx.lineWidth = 1;
       for (let x = 0; x <= ARENA_VIEW_SIZE; x += tile) {
         const sx = VIEW_LEFT + x;
@@ -845,16 +893,17 @@
       for (const e of electricEffects) e.draw();
       fighterA.drawHeadHPBar();
       fighterB.drawHeadHPBar();
+      drawDamagePopups();
 
-      ctx.strokeStyle = '#a98ee8';
+      ctx.strokeStyle = '#6f7684';
       ctx.lineWidth = 5;
       ctx.strokeRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
-      ctx.strokeStyle = '#b89cff';
+      ctx.strokeStyle = '#8c94a3';
       ctx.lineWidth = 2;
       ctx.strokeRect(VIEW_LEFT + 3, visTop + 3, ARENA_VIEW_SIZE - 6, visH - 6);
 
       const visBottom = VIEW_TOP + ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y;
-      ctx.fillStyle = '#140f20';
+      ctx.fillStyle = '#f7f8fb';
       ctx.fillRect(0, visBottom, GAME_WIDTH, GAME_HEIGHT - visBottom);
 
       drawBottomHPText(VIEW_TOP + ARENA_VIEW_SIZE + 36);
@@ -862,13 +911,14 @@
 
     function startBattle() {
       const mid = ARENA_VIEW_SIZE / 2;
-      fighterA = new Fighter(mid - 100, mid, p1Choice, 0, '#3d8b5e', null);
-      fighterB = new Fighter(mid + 100, mid, p2Choice, 1, '#c45c26', null);
+      fighterA = new Fighter(mid - 100, mid, p1Choice, 0, CHARACTERS[p1Choice].damageColor, null);
+      fighterB = new Fighter(mid + 100, mid, p2Choice, 1, CHARACTERS[p2Choice].damageColor, null);
       fighterA.enemy = fighterB;
       fighterB.enemy = fighterA;
       fighterA.giveInitialVelocity();
       fighterB.giveInitialVelocity();
       electricEffects = [];
+      damagePopups = [];
       resetScreenCamera();
       gameState = 'battle';
     }
@@ -889,6 +939,7 @@
         resolveBodyCollision(fighterA, fighterB);
         electricEffects = electricEffects.filter(e => e.alive);
         for (const e of electricEffects) e.update(dt);
+        updateDamagePopups(dt);
         updateScreenCamera(dt);
 
         drawFixedUI();
