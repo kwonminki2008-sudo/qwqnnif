@@ -40,10 +40,29 @@
     const BASE_RENDER_HEIGHT   = 130;
     const HITBOX_RADIUS        = 32;
 
+    const HAMMER_VISUAL_SCALE = 0.97;
+
     const SPRITE_SCALE_OVERRIDES = {
-      'hammer_skill_ready.png': 1.07,
-      'hammer_skill_cast.png': 1.14
+      'hammer_skill_ready.png': HAMMER_VISUAL_SCALE * 0.98,
+      'hammer_skill_cast.png': HAMMER_VISUAL_SCALE * 1.03,
+      'orc_left_attack_up.png': 1.12,
+      'orc_right_attack_up.png': 1.12,
+      'orc_left_attack_diag_up.png': 1.10,
+      'orc_right_attack_diag_up.png': 1.10
     };
+
+    const SPRITE_FEET_ANCHOR_UP = {
+      'orc_left_attack_up.png': true,
+      'orc_right_attack_up.png': true,
+      'orc_left_attack_diag_up.png': true,
+      'orc_right_attack_diag_up.png': true
+    };
+
+    function getSpriteScaleMul(charId, filename) {
+      if (filename in SPRITE_SCALE_OVERRIDES) return SPRITE_SCALE_OVERRIDES[filename];
+      if (charId === 'hammer' && filename.startsWith('hammer_')) return HAMMER_VISUAL_SCALE;
+      return 1;
+    }
 
     const arenaTop         = 0;
     const arenaBottom      = ARENA_VIEW_SIZE;
@@ -74,8 +93,8 @@
 
     const CHARACTERS = {
       orc: {
-        id: 'orc', displayName: 'Orc', path: 'assets/sprites/orc/',
-        maxHp: 100, damage: 10, damageColor: '#36d46b',
+        id: 'orc', displayName: 'Blue Orc', path: 'assets/sprites/orc/',
+        maxHp: 100, damage: 10, damageColor: '#35d66f',
         files: [
           'orc_left_idle.png','orc_left_walk.png','orc_left_weapon_ready.png',
           'orc_left_kick_ready.png','orc_left_attack_forward.png','orc_left_attack_up.png',
@@ -530,8 +549,10 @@
         const center = arenaToScreen(this.x, this.y);
         const img = this.getCurrentImage();
         if (img) {
+          const filename = this.getFilename();
           const sc = ensureCharScale(this.charId);
-          const mul = SPRITE_SCALE_OVERRIDES[this.getFilename()] || 1;
+          const mul = getSpriteScaleMul(this.charId, filename);
+          const footAnchor = !!SPRITE_FEET_ANCHOR_UP[filename];
           const fbScale = BASE_RENDER_HEIGHT / safeSize(img.naturalHeight, 100);
           const scale = safeSize(sc && sc.scale, fbScale) * mul;
           let drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
@@ -540,10 +561,13 @@
           let drawY = center.y - drawH * 0.52;
           try {
             const info = getSpriteDrawInfo(img, this.charId);
-            drawW = safeSize(info.drawW * mul, drawW);
-            drawH = safeSize(info.drawH * mul, drawH);
+            const baseDrawW = safeSize(info.drawW, drawW);
+            const baseDrawH = safeSize(info.drawH, drawH);
+            drawW = safeSize(baseDrawW * mul, drawW);
+            drawH = safeSize(baseDrawH * mul, drawH);
+            const footShift = footAnchor ? (drawH - baseDrawH) / 2 : 0;
             drawX = center.x - safeSize(info.anchorOffX * mul, drawW / 2);
-            drawY = center.y - safeSize(info.anchorOffY * mul, drawH * 0.52);
+            drawY = center.y - safeSize(info.anchorOffY * mul, drawH * 0.52) - footShift;
             if (!isFinite(drawX)) drawX = center.x - drawW / 2;
             if (!isFinite(drawY)) drawY = center.y - drawH * 0.52;
             if (!Number.isFinite(drawX) || !Number.isFinite(drawY) || drawW <= 0 || drawH <= 0) {
@@ -840,6 +864,21 @@
       ctx.fillText(fighterB.name + '  ' + Math.ceil(fighterB.hp) + ' / ' + fighterB.maxHp, GAME_WIDTH - 24, y);
     }
 
+    function drawLabelWithDot(text, dotColor, cx, y) {
+      ctx.font = 'bold 13px sans-serif';
+      const dotR = 3.5;
+      const gap = 6;
+      const tw = ctx.measureText(text).width;
+      const x0 = cx - (dotR * 2 + gap + tw) / 2;
+      ctx.fillStyle = dotColor;
+      ctx.beginPath();
+      ctx.arc(x0 + dotR, y - 3, dotR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#2b303a';
+      ctx.fillText(text, x0 + dotR * 2 + gap, y);
+    }
+
     function drawFixedUI() {
       ctx.fillStyle = '#f4f5f8';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -855,16 +894,10 @@
 
       ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = 'center';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#2a2f3a';
-      ctx.strokeText(fighterA.name.toUpperCase(), GAME_WIDTH / 2 - 90, 82);
-      ctx.fillStyle = fighterA.cfg.damageColor;
-      ctx.fillText(fighterA.name.toUpperCase(), GAME_WIDTH / 2 - 90, 82);
+      drawLabelWithDot(fighterA.name.toUpperCase(), fighterA.cfg.damageColor, GAME_WIDTH / 2 - 90, 82);
       ctx.fillStyle = '#555e70';
       ctx.fillText('VS', GAME_WIDTH / 2, 82);
-      ctx.strokeText(fighterB.name.toUpperCase(), GAME_WIDTH / 2 + 90, 82);
-      ctx.fillStyle = fighterB.cfg.damageColor;
-      ctx.fillText(fighterB.name.toUpperCase(), GAME_WIDTH / 2 + 90, 82);
+      drawLabelWithDot(fighterB.name.toUpperCase(), fighterB.cfg.damageColor, GAME_WIDTH / 2 + 90, 82);
 
       ctx.fillStyle = '#555e70';
       ctx.font = '11px sans-serif';
