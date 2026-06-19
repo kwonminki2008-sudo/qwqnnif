@@ -40,6 +40,11 @@
     const BASE_RENDER_HEIGHT   = 130;
     const HITBOX_RADIUS        = 32;
 
+    const SPRITE_SCALE_OVERRIDES = {
+      'hammer_skill_ready.png': 1.07,
+      'hammer_skill_cast.png': 1.14
+    };
+
     const arenaTop         = 0;
     const arenaBottom      = ARENA_VIEW_SIZE;
     const visualArenaTop   = arenaTop - ARENA_VISUAL_EXTRA_Y;
@@ -526,18 +531,19 @@
         const img = this.getCurrentImage();
         if (img) {
           const sc = ensureCharScale(this.charId);
+          const mul = SPRITE_SCALE_OVERRIDES[this.getFilename()] || 1;
           const fbScale = BASE_RENDER_HEIGHT / safeSize(img.naturalHeight, 100);
-          const scale = safeSize(sc && sc.scale, fbScale);
+          const scale = safeSize(sc && sc.scale, fbScale) * mul;
           let drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
           let drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
           let drawX = center.x - drawW / 2;
           let drawY = center.y - drawH * 0.52;
           try {
             const info = getSpriteDrawInfo(img, this.charId);
-            drawW = safeSize(info.drawW, drawW);
-            drawH = safeSize(info.drawH, drawH);
-            drawX = center.x - safeSize(info.anchorOffX, drawW / 2);
-            drawY = center.y - safeSize(info.anchorOffY, drawH * 0.52);
+            drawW = safeSize(info.drawW * mul, drawW);
+            drawH = safeSize(info.drawH * mul, drawH);
+            drawX = center.x - safeSize(info.anchorOffX * mul, drawW / 2);
+            drawY = center.y - safeSize(info.anchorOffY * mul, drawH * 0.52);
             if (!isFinite(drawX)) drawX = center.x - drawW / 2;
             if (!isFinite(drawY)) drawY = center.y - drawH * 0.52;
             if (!Number.isFinite(drawX) || !Number.isFinite(drawY) || drawW <= 0 || drawH <= 0) {
