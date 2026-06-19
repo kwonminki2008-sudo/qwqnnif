@@ -19,7 +19,7 @@
       font-family: 'Segoe UI', Arial, sans-serif;
     }
     #game-wrap { transform-origin: center center; }
-    canvas { display: block; background: #f7f8fb; }
+    canvas { display: block; background: #f4f5f8; }
   </style>
 </head>
 <body>
@@ -785,7 +785,7 @@
     }
 
     function drawSelectScreen() {
-      ctx.fillStyle = '#f7f8fb';
+      ctx.fillStyle = '#f4f5f8';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
       ctx.fillStyle = '#1f2430';
       ctx.font = 'bold 32px sans-serif';
@@ -800,7 +800,7 @@
       ctx.fillText('P2: ' + CHARACTERS[p2Choice].displayName, GAME_WIDTH / 2, 250);
       ctx.fillStyle = '#e8ebf0';
       ctx.fillRect(120, 420, 300, 48);
-      ctx.strokeStyle = '#8c94a3';
+      ctx.strokeStyle = '#5f6775';
       ctx.lineWidth = 2;
       ctx.strokeRect(120, 420, 300, 48);
       ctx.fillStyle = '#1f2430';
@@ -835,19 +835,28 @@
     }
 
     function drawFixedUI() {
-      ctx.fillStyle = '#f7f8fb';
+      ctx.fillStyle = '#f4f5f8';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.12)';
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetY = 2;
       ctx.fillStyle = '#1f2430';
       ctx.font = 'bold 30px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('ARENA BATTLE SIMULATOR', GAME_WIDTH / 2, 46);
+      ctx.restore();
 
       ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#2a2f3a';
+      ctx.strokeText(fighterA.name.toUpperCase(), GAME_WIDTH / 2 - 90, 82);
       ctx.fillStyle = fighterA.cfg.damageColor;
       ctx.fillText(fighterA.name.toUpperCase(), GAME_WIDTH / 2 - 90, 82);
       ctx.fillStyle = '#555e70';
       ctx.fillText('VS', GAME_WIDTH / 2, 82);
+      ctx.strokeText(fighterB.name.toUpperCase(), GAME_WIDTH / 2 + 90, 82);
       ctx.fillStyle = fighterB.cfg.damageColor;
       ctx.fillText(fighterB.name.toUpperCase(), GAME_WIDTH / 2 + 90, 82);
 
@@ -865,11 +874,11 @@
       ctx.rect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
       ctx.clip();
 
-      ctx.fillStyle = '#f8f9fb';
+      ctx.fillStyle = '#e7e9ee';
       ctx.fillRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
 
       const tile = 60;
-      ctx.strokeStyle = 'rgba(120, 130, 150, 0.28)';
+      ctx.strokeStyle = '#c6cbd3';
       ctx.lineWidth = 1;
       for (let x = 0; x <= ARENA_VIEW_SIZE; x += tile) {
         const sx = VIEW_LEFT + x;
@@ -895,15 +904,14 @@
       fighterB.drawHeadHPBar();
       drawDamagePopups();
 
-      ctx.strokeStyle = '#6f7684';
+      ctx.strokeStyle = '#5f6775';
       ctx.lineWidth = 5;
       ctx.strokeRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
-      ctx.strokeStyle = '#8c94a3';
       ctx.lineWidth = 2;
       ctx.strokeRect(VIEW_LEFT + 3, visTop + 3, ARENA_VIEW_SIZE - 6, visH - 6);
 
       const visBottom = VIEW_TOP + ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y;
-      ctx.fillStyle = '#f7f8fb';
+      ctx.fillStyle = '#f4f5f8';
       ctx.fillRect(0, visBottom, GAME_WIDTH, GAME_HEIGHT - visBottom);
 
       drawBottomHPText(VIEW_TOP + ARENA_VIEW_SIZE + 36);
