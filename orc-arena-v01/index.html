@@ -43,10 +43,12 @@
     const HAMMER_VISUAL_SCALE = 0.97;
 
     const SPRITE_SCALE_OVERRIDES = {
-      'hammer_left_walk.png': HAMMER_VISUAL_SCALE * 0.97,
+      'hammer_left_walk.png': HAMMER_VISUAL_SCALE * 0.94,
       'hammer_right_walk.png': HAMMER_VISUAL_SCALE * 0.94,
       'hammer_skill_ready.png': HAMMER_VISUAL_SCALE * 0.98,
-      'hammer_skill_cast.png': HAMMER_VISUAL_SCALE * 1.08,
+      'hammer_skill_cast.png': HAMMER_VISUAL_SCALE * 1.10,
+      'hammer_left_attack_up.png': HAMMER_VISUAL_SCALE * 1.08,
+      'hammer_right_attack_up.png': HAMMER_VISUAL_SCALE * 1.08,
       'hammer_left_attack_down.png': HAMMER_VISUAL_SCALE * 0.93,
       'hammer_left_attack_diag_down.png': HAMMER_VISUAL_SCALE * 0.93,
       'hammer_right_attack_down.png': HAMMER_VISUAL_SCALE * 0.94,
@@ -535,6 +537,21 @@
         this.faceLockTime = FACE_LOCK_TIME;
       }
 
+      getContactDamage() {
+        if (this.charId === 'orc' && this.attackTimer > 0 &&
+            (this.attackPose === 'kick_down' || this.attackPose === 'kick_diag_down')) {
+          return this.cfg.kickDamage;
+        }
+        if (this.charId === 'orc') {
+          const edx = this.enemy.x - this.x;
+          const edy = this.enemy.y - this.y;
+          const ax = Math.abs(edx);
+          const ay = Math.abs(edy);
+          if (edy > ay * 0.5 && edy > 10) return this.cfg.kickDamage;
+        }
+        return this.damage;
+      }
+
       takeDamage(amount) {
         if (!this.alive || this.damageCooldown > 0) return 0;
         let dmg = amount;
@@ -747,7 +764,7 @@
         const bn = normalizeSpeed(b.vx, b.vy, UNIT_SPEED);
         b.vx = bn.vx; b.vy = bn.vy;
         b.applyAntiStuck();
-        const dmg = a.takeDamage(b.damage);
+        const dmg = a.takeDamage(b.getContactDamage());
         if (dmg > 0) {
           spawnDamagePopup(a, dmg, b.cfg.damageColor);
           b.lockFacingOnHit();
@@ -768,7 +785,7 @@
         const an = normalizeSpeed(a.vx, a.vy, UNIT_SPEED);
         a.vx = an.vx; a.vy = an.vy;
         a.applyAntiStuck();
-        const dmg = b.takeDamage(a.damage);
+        const dmg = b.takeDamage(a.getContactDamage());
         if (dmg > 0) {
           spawnDamagePopup(b, dmg, a.cfg.damageColor);
           a.lockFacingOnHit();
@@ -802,8 +819,8 @@
 
       const aAliveBefore = a.alive;
       const bAliveBefore = b.alive;
-      const aDmg = a.takeDamage(b.damage);
-      const bDmg = b.takeDamage(a.damage);
+      const aDmg = a.takeDamage(b.getContactDamage());
+      const bDmg = b.takeDamage(a.getContactDamage());
       if (aDmg > 0) spawnDamagePopup(a, aDmg, b.cfg.damageColor);
       if (bDmg > 0) spawnDamagePopup(b, bDmg, a.cfg.damageColor);
       if (aDmg > 0 || bDmg > 0) {
