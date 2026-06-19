@@ -46,7 +46,9 @@
       'hammer_left_walk.png': HAMMER_VISUAL_SCALE * 0.94,
       'hammer_right_walk.png': HAMMER_VISUAL_SCALE * 0.94,
       'hammer_skill_ready.png': HAMMER_VISUAL_SCALE * 0.98,
-      'hammer_skill_cast.png': HAMMER_VISUAL_SCALE * 1.06,
+      'hammer_skill_cast.png': HAMMER_VISUAL_SCALE * 1.08,
+      'hammer_right_attack_down.png': HAMMER_VISUAL_SCALE * 0.94,
+      'hammer_right_attack_diag_down.png': HAMMER_VISUAL_SCALE * 0.94,
       'orc_left_attack_up.png': 1.12,
       'orc_right_attack_up.png': 1.12,
       'orc_left_attack_diag_up.png': 1.10,
@@ -63,7 +65,7 @@
     function getSpriteScaleMul(charId, filename) {
       if (filename in SPRITE_SCALE_OVERRIDES) return SPRITE_SCALE_OVERRIDES[filename];
       if (charId === 'hammer' && filename.startsWith('hammer_')) return HAMMER_VISUAL_SCALE;
-      return 1;
+      return 1; // Blue Orc and all other frames: stable 1.0 base
     }
 
     const arenaTop         = 0;
