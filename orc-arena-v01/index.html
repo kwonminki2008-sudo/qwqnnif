@@ -6,118 +6,100 @@
   <title>Orc Battle</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: black; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0e0a16;
+    }
     body {
       display: flex;
       justify-content: center;
       align-items: center;
       font-family: 'Segoe UI', Arial, sans-serif;
     }
+    #game-wrap { transform-origin: center center; }
     canvas { display: block; background: #100b1c; }
   </style>
 </head>
 <body>
-  <canvas id="game" width="540" height="960"></canvas>
+  <div id="game-wrap">
+    <canvas id="game" width="540" height="960"></canvas>
+  </div>
+
   <script>
-    const GAME_WIDTH = 540;
+    // ─── Tunable constants ──────────────────────────────────────────────────
+    const GAME_WIDTH  = 540;
     const GAME_HEIGHT = 960;
-    const ARENA_VIEW_SIZE = 500;
-    const ARENA_WORLD_SIZE = 900;
-    const VIEW_LEFT = (GAME_WIDTH - ARENA_VIEW_SIZE) / 2;
-    const VIEW_TOP = 100;
 
-    const SPRITE_TARGET_HEIGHT = 150;
-    const HITBOX_RADIUS = 32;
-    const MOVE_SPEED = 220;
-    const MIN_SPEED = 40;
-    const MAX_SPEED = 220;
-    const WALL_BOUNCE = MOVE_SPEED * 0.55;
-    const WALL_EPS = 0.75;
-    const DAMAGE_COOLDOWN = 0.6;
+    const ARENA_VIEW_SIZE  = 500;
+    const VIEW_LEFT        = (GAME_WIDTH - ARENA_VIEW_SIZE) / 2;
+    const VIEW_TOP         = 108;
+    const ARENA_VISUAL_EXTRA_Y = 18;
+
+    const BASE_RENDER_HEIGHT   = 130;
+    const HITBOX_RADIUS        = 32;
+
+    const arenaTop         = 0;
+    const arenaBottom      = ARENA_VIEW_SIZE;
+    const visualArenaTop   = arenaTop - ARENA_VISUAL_EXTRA_Y;
+    const visualArenaBottom = arenaBottom + ARENA_VISUAL_EXTRA_Y;
+    const HP_BAR_OFFSET_Y  = HITBOX_RADIUS + 36;
+
+    const UNIT_SPEED          = 220;
+    const MIN_WALL_BOUNCE     = UNIT_SPEED * 0.55;
+    const WALL_EPS            = 0.75;
+    const FACE_LOCK_TIME      = 0.5;
+    const DAMAGE              = 8;
+    const DAMAGE_COOLDOWN     = 0.6;
     const ATTACK_DISPLAY_TIME = 0.15;
-    const FACE_LOCK_TIME = 0.5;
-    const CLOSE_RANGE = 95;
+
+    const MAX_HP             = 100;
+    const WALK_BOB_AMPLITUDE = 3;
+    const WALK_BOB_SPEED     = 10;
+    const CLOSE_RANGE        = 95;
     const READY_DISPLAY_TIME = 0.5;
-    const HP_BAR_OFFSET_Y = HITBOX_RADIUS + 36;
 
-    const CAMERA_LERP = 0.08;
-    const HAMMER_SKILL_COOLDOWN = 5;
-    const HAMMER_SKILL_PREP_TIME = 0.5;
-    const HAMMER_SKILL_DAMAGE = 5;
-    const PARALYZE_DURATION = 1.75;
-    const ELECTRIC_EFFECT_SIZE = 48;
-    const ELECTRIC_SPEED = 420;
+    const MAX_SCREEN_PAN = 12;
+    const SCREEN_CAMERA_LERP = 0.06;
+    const screenCamera = { x: 0, y: 0, zoom: 1, shakeTime: 0, shakePower: 0, hitPulse: 0 };
+    // ──────────────────────────────────────────────────────────────────────
 
-    const CHARACTERS = {
-      orc: {
-        id: 'orc', name: 'Orc', path: 'assets/sprites/orc/',
-        maxHp: 100, damage: 8,
-        files: [
-          'orc_left_idle.png','orc_left_walk.png','orc_left_weapon_ready.png',
-          'orc_left_kick_ready.png','orc_left_attack_forward.png','orc_left_attack_up.png',
-          'orc_left_attack_diag_up.png','orc_left_kick_down.png','orc_left_kick_diag_down.png',
-          'orc_right_idle.png','orc_right_walk.png','orc_right_weapon_ready.png',
-          'orc_right_kick_ready.png','orc_right_attack_forward.png','orc_right_attack_up.png',
-          'orc_right_attack_diag_up.png','orc_right_kick_down.png','orc_right_kick_diag_down.png',
-          'orc_dead.png'
-        ],
-        poseFile(pose, facing) {
-          if (pose === 'dead') return 'orc_dead.png';
-          return `orc_${facing}_${pose}.png`;
-        },
-        scaleOverrides: {
-          'orc_left_attack_up.png': 1.14, 'orc_right_attack_up.png': 1.14,
-          'orc_left_attack_diag_up.png': 1.12, 'orc_right_attack_diag_up.png': 1.12,
-          'orc_left_kick_down.png': 1.15, 'orc_right_kick_down.png': 1.15,
-          'orc_left_kick_diag_down.png': 1.13, 'orc_right_kick_diag_down.png': 1.13
-        }
-      },
-      hammer: {
-        id: 'hammer', name: 'Hammer', path: 'assets/sprites/hammer/',
-        maxHp: 60, damage: 7,
-        files: [
-          'hammer_left_idle.png','hammer_left_walk.png','hammer_left_weapon_ready.png',
-          'hammer_left_attack_forward.png','hammer_left_attack_up.png','hammer_left_attack_diag_up.png',
-          'hammer_left_attack_diag_down.png','hammer_left_attack_down.png',
-          'hammer_right_idle.png','hammer_right_walk.png','hammer_right_weapon_ready.png',
-          'hammer_right_attack_forward.png','hammer_right_attack_up.png','hammer_right_attack_diag_up.png',
-          'hammer_right_attack_diag_down.png','hammer_right_attack_down.png',
-          'hammer_dead.png','hammer_skill_ready.png','hammer_skill_cast.png','hammer_electric_effect.png'
-        ],
-        poseFile(pose, facing) {
-          if (pose === 'dead') return 'hammer_dead.png';
-          if (pose === 'skill_ready') return 'hammer_skill_ready.png';
-          if (pose === 'skill_cast') return 'hammer_skill_cast.png';
-          return `hammer_${facing}_${pose}.png`;
-        },
-        scaleOverrides: {}
-      }
+    const gameWrap = document.getElementById('game-wrap');
+    const canvas = document.getElementById('game');
+    const ctx    = canvas.getContext('2d');
+
+    const SPRITE_PATH = 'assets/sprites/orc/';
+
+    const POSE = {
+      idle:           (f) => `orc_${f}_idle.png`,
+      walk:           (f) => `orc_${f}_walk.png`,
+      weapon_ready:   (f) => `orc_${f}_weapon_ready.png`,
+      kick_ready:     (f) => `orc_${f}_kick_ready.png`,
+      attack_forward: (f) => `orc_${f}_attack_forward.png`,
+      attack_up:      (f) => `orc_${f}_attack_up.png`,
+      attack_diag_up: (f) => `orc_${f}_attack_diag_up.png`,
+      kick_down:      (f) => `orc_${f}_kick_down.png`,
+      kick_diag_down: (f) => `orc_${f}_kick_diag_down.png`,
+      dead:           ()  => 'orc_dead.png'
     };
 
-    const canvas = document.getElementById('game');
-    const ctx = canvas.getContext('2d');
     const images = {};
     const spriteCropCache = {};
-    const scaleCache = {};
-
-    let gameState = 'select';
-    let p1Choice = 'orc';
-    let p2Choice = 'orc';
-    let fighterA = null;
-    let fighterB = null;
-    let electricEffects = [];
-    let camera = { x: 0, y: 0 };
-    let lastTime = 0;
-    let matchEnded = false;
+    let fixedSpriteScale = null;
+    let fixedAnchorOffX = null;
+    let fixedAnchorOffY = null;
 
     function cropTransparent(img) {
       const key = img.src;
       if (spriteCropCache[key]) return spriteCropCache[key];
-      const w = img.naturalWidth, h = img.naturalHeight;
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
       const fallback = { sx: 0, sy: 0, sw: w, sh: h, bodyCx: w / 2, bodyCy: h * 0.52, ok: false };
       try {
         const c = document.createElement('canvas');
-        c.width = w; c.height = h;
+        c.width = w;
+        c.height = h;
         const cctx = c.getContext('2d');
         cctx.drawImage(img, 0, 0);
         const data = cctx.getImageData(0, 0, w, h).data;
@@ -133,7 +115,8 @@
           }
         }
         if (maxX < minX) { spriteCropCache[key] = fallback; return fallback; }
-        const cw = maxX - minX + 1, ch = maxY - minY + 1;
+        const cw = maxX - minX + 1;
+        const ch = maxY - minY + 1;
         if (cw < 1 || ch < 1) { spriteCropCache[key] = fallback; return fallback; }
         const crop = { sx: minX, sy: minY, sw: cw, sh: ch, bodyCx: minX + cw / 2, bodyCy: minY + ch * 0.52, ok: true };
         spriteCropCache[key] = crop;
@@ -144,93 +127,98 @@
       }
     }
 
-    function safeSize(n, fb) {
-      const f = (typeof fb === 'number' && isFinite(fb) && fb > 0) ? fb : 1;
-      return (typeof n === 'number' && isFinite(n) && n > 0) ? n : f;
+    function safeSize(n, fallback) {
+      const fb = (typeof fallback === 'number' && isFinite(fallback) && fallback > 0) ? fallback : 1;
+      return (typeof n === 'number' && isFinite(n) && n > 0) ? n : fb;
     }
 
-    function ensureCharScale(charId) {
-      if (scaleCache[charId]) return scaleCache[charId];
-      const cfg = CHARACTERS[charId];
-      const base = getImage(cfg.path + cfg.poseFile('walk', 'right')) ||
-                   getImage(cfg.path + cfg.poseFile('walk', 'left'));
-      if (!base) return null;
-      const crop = cropTransparent(base);
-      const scale = SPRITE_TARGET_HEIGHT / safeSize(crop.sh, base.naturalHeight);
-      scaleCache[charId] = {
-        scale,
-        anchorOffX: (crop.bodyCx - crop.sx) * scale,
-        anchorOffY: (crop.bodyCy - crop.sy) * scale
-      };
-      return scaleCache[charId];
-    }
-
-    function getSpriteDrawInfo(img, charId, filename) {
-      const sc = ensureCharScale(charId);
+    function getSpriteDrawInfo(img) {
+      ensureFixedScale();
       const crop = cropTransparent(img);
-      const baseScale = safeSize(sc && sc.scale, SPRITE_TARGET_HEIGHT / safeSize(crop.sh, img.naturalHeight));
-      const cfg = CHARACTERS[charId];
-      const ov = (cfg.scaleOverrides && cfg.scaleOverrides[filename]) || 1;
-      const scale = baseScale * ov;
+      const scale = safeSize(fixedSpriteScale, BASE_RENDER_HEIGHT / safeSize(crop.sh, img.naturalHeight));
       const drawW = safeSize(crop.sw * scale, img.naturalWidth * scale);
-      const drawH = safeSize(crop.sh * scale, SPRITE_TARGET_HEIGHT);
+      const drawH = safeSize(crop.sh * scale, BASE_RENDER_HEIGHT);
       return {
-        crop, drawW, drawH,
-        anchorOffX: safeSize(sc && sc.anchorOffX * ov, drawW / 2),
-        anchorOffY: safeSize(sc && sc.anchorOffY * ov, drawH * 0.52),
+        crop,
+        scale,
+        drawW,
+        drawH,
+        anchorOffX: safeSize(fixedAnchorOffX, drawW / 2),
+        anchorOffY: safeSize(fixedAnchorOffY, drawH * 0.52),
         ok: crop.ok
       };
     }
 
+    function ensureFixedScale() {
+      if (fixedSpriteScale && isFinite(fixedSpriteScale) && fixedSpriteScale > 0) return;
+      fixedSpriteScale = null;
+      const base = getImage('orc_right_walk.png') || getImage('orc_left_walk.png');
+      if (!base || base.naturalHeight < 1) return;
+      const crop = cropTransparent(base);
+      fixedSpriteScale = BASE_RENDER_HEIGHT / safeSize(crop.sh, base.naturalHeight);
+      fixedAnchorOffX = (crop.bodyCx - crop.sx) * fixedSpriteScale;
+      fixedAnchorOffY = (crop.bodyCy - crop.sy) * fixedSpriteScale;
+    }
+
     function loadAllImages() {
-      for (const id of Object.keys(CHARACTERS)) {
-        const cfg = CHARACTERS[id];
-        for (const name of cfg.files) {
-          const img = new Image();
-          img.onerror = () => { img._failed = true; };
-          img.src = cfg.path + name;
-          images[cfg.path + name] = img;
-        }
+      const names = [
+        'orc_left_idle.png', 'orc_left_walk.png', 'orc_left_weapon_ready.png',
+        'orc_left_kick_ready.png', 'orc_left_attack_forward.png',
+        'orc_left_attack_up.png', 'orc_left_attack_diag_up.png',
+        'orc_left_kick_down.png', 'orc_left_kick_diag_down.png',
+        'orc_right_idle.png', 'orc_right_walk.png', 'orc_right_weapon_ready.png',
+        'orc_right_kick_ready.png', 'orc_right_attack_forward.png',
+        'orc_right_attack_up.png', 'orc_right_attack_diag_up.png',
+        'orc_right_kick_down.png', 'orc_right_kick_diag_down.png',
+        'orc_dead.png'
+      ];
+      for (const name of names) {
+        const img = new Image();
+        img.onerror = () => { img._failed = true; };
+        img.src = SPRITE_PATH + name;
+        images[name] = img;
       }
     }
 
-    function getImage(src) {
-      const img = images[src];
+    function getImage(filename) {
+      const img = images[filename];
       if (img && !img._failed && img.complete && img.naturalWidth > 0) return img;
       return null;
     }
 
+    function getSpriteDrawSize(img) {
+      const info = getSpriteDrawInfo(img);
+      return { drawW: info.drawW, drawH: info.drawH };
+    }
+
     function normalizeSpeed(vx, vy, target) {
       const s = Math.hypot(vx, vy);
-      if (s < MIN_SPEED) {
+      if (s < 1) {
         const a = Math.random() * Math.PI * 2;
         return { vx: Math.cos(a) * target, vy: Math.sin(a) * target };
       }
-      const k = Math.min(MAX_SPEED, target) / s;
+      const k = target / s;
       return { vx: vx * k, vy: vy * k };
     }
 
-    function worldToScreen(wx, wy) {
-      return { x: VIEW_LEFT + wx - camera.x, y: VIEW_TOP + wy - camera.y };
+    function arenaToScreen(ax, ay) {
+      return { x: VIEW_LEFT + ax, y: VIEW_TOP + ay };
     }
 
-    function clampWorld(v) {
-      return Math.max(HITBOX_RADIUS, Math.min(ARENA_WORLD_SIZE - HITBOX_RADIUS, v));
+    function clampArena(v) {
+      return Math.max(HITBOX_RADIUS, Math.min(ARENA_VIEW_SIZE - HITBOX_RADIUS, v));
     }
 
-    class Fighter {
-      constructor(x, y, charId, playerIndex, enemy) {
-        const cfg = CHARACTERS[charId];
-        this.x = x; this.y = y;
-        this.vx = 0; this.vy = 0;
-        this.charId = charId;
-        this.cfg = cfg;
-        this.name = cfg.name;
-        this.playerIndex = playerIndex;
+    class Orc {
+      constructor(x, y, color, name, enemy) {
+        this.x = x;
+        this.y = y;
+        this.vx = 0;
+        this.vy = 0;
+        this.color = color;
+        this.name = name;
         this.enemy = enemy;
-        this.maxHp = cfg.maxHp;
-        this.hp = cfg.maxHp;
-        this.damage = cfg.damage;
+        this.hp = MAX_HP;
         this.alive = true;
         this.facing = 'right';
         this.damageCooldown = 0;
@@ -240,21 +228,17 @@
         this.readyTimer = 0;
         this.readyPose = 'weapon_ready';
         this.inCloseRange = false;
-        this.paralyzeTimer = 0;
-        this.skillCooldown = HAMMER_SKILL_COOLDOWN;
-        this.skillPhase = 'none';
-        this.skillPrepTimer = 0;
+        this.walkPhase = Math.random() * Math.PI * 2;
       }
-
-      isParalyzed() { return this.paralyzeTimer > 0; }
 
       getFilename() {
         const pose = this.getPose();
-        return this.cfg.poseFile(pose, this.facing);
+        if (pose === 'dead') return POSE.dead();
+        return POSE[pose](this.facing);
       }
 
       getCurrentImage() {
-        return getImage(this.cfg.path + this.getFilename());
+        return getImage(this.getFilename());
       }
 
       setFacingTowardEnemy() {
@@ -263,147 +247,107 @@
       }
 
       giveInitialVelocity() {
-        const a = Math.random() * Math.PI * 2;
-        this.vx = Math.cos(a) * MOVE_SPEED;
-        this.vy = Math.sin(a) * MOVE_SPEED;
+        const angle = Math.random() * Math.PI * 2;
+        this.vx = Math.cos(angle) * UNIT_SPEED;
+        this.vy = Math.sin(angle) * UNIT_SPEED;
         this.facing = this.vx >= 0 ? 'right' : 'left';
       }
 
-      enforceSpeed() {
-        const n = normalizeSpeed(this.vx, this.vy, MOVE_SPEED);
-        this.vx = n.vx; this.vy = n.vy;
+      enforceConstantSpeed() {
+        const n = normalizeSpeed(this.vx, this.vy, UNIT_SPEED);
+        this.vx = n.vx;
+        this.vy = n.vy;
       }
 
       resolveWallBounce() {
-        const r = HITBOX_RADIUS, max = ARENA_WORLD_SIZE - r;
-        if (this.x <= r) { this.x = r + WALL_EPS; if (this.vx < 0) this.vx = Math.max(Math.abs(this.vx), WALL_BOUNCE); }
-        if (this.x >= max) { this.x = max - WALL_EPS; if (this.vx > 0) this.vx = -Math.max(Math.abs(this.vx), WALL_BOUNCE); }
-        if (this.y <= r) { this.y = r + WALL_EPS; if (this.vy < 0) this.vy = Math.max(Math.abs(this.vy), WALL_BOUNCE); }
-        if (this.y >= max) { this.y = max - WALL_EPS; if (this.vy > 0) this.vy = -Math.max(Math.abs(this.vy), WALL_BOUNCE); }
-        this.enforceSpeed();
+        const r = HITBOX_RADIUS;
+        const maxX = ARENA_VIEW_SIZE - r;
+        const maxY = ARENA_VIEW_SIZE - r;
+
+        if (this.x <= r) {
+          this.x = r + WALL_EPS;
+          if (this.vx < 0) this.vx = Math.max(Math.abs(this.vx), MIN_WALL_BOUNCE);
+        }
+        if (this.x >= maxX) {
+          this.x = maxX - WALL_EPS;
+          if (this.vx > 0) this.vx = -Math.max(Math.abs(this.vx), MIN_WALL_BOUNCE);
+        }
+        if (this.y <= r) {
+          this.y = r + WALL_EPS;
+          if (this.vy < 0) this.vy = Math.max(Math.abs(this.vy), MIN_WALL_BOUNCE);
+        }
+        if (this.y >= maxY) {
+          this.y = maxY - WALL_EPS;
+          if (this.vy > 0) this.vy = -Math.max(Math.abs(this.vy), MIN_WALL_BOUNCE);
+        }
+        this.enforceConstantSpeed();
       }
 
       applyAntiStuck() {
-        this.x = clampWorld(this.x);
-        this.y = clampWorld(this.y);
-        if (!this.isParalyzed()) {
-          const s = Math.hypot(this.vx, this.vy);
-          if (!isFinite(this.vx) || !isFinite(this.vy) || s < MIN_SPEED) {
-            const a = Math.random() * Math.PI * 2;
-            this.vx = Math.cos(a) * MOVE_SPEED;
-            this.vy = Math.sin(a) * MOVE_SPEED;
-          }
-          this.enforceSpeed();
+        this.x = clampArena(this.x);
+        this.y = clampArena(this.y);
+        const s = Math.hypot(this.vx, this.vy);
+        if (!isFinite(this.vx) || !isFinite(this.vy) || s < 1) {
+          const a = Math.random() * Math.PI * 2;
+          this.vx = Math.cos(a) * UNIT_SPEED;
+          this.vy = Math.sin(a) * UNIT_SPEED;
         }
-      }
-
-      applyParalyze(duration) {
-        if (!this.alive) return;
-        this.paralyzeTimer = Math.max(this.paralyzeTimer, duration);
-        this.vx = 0; this.vy = 0;
-      }
-
-      updateHammerSkill(dt) {
-        if (this.charId !== 'hammer' || !this.alive) return;
-        if (this.skillPhase === 'prep') {
-          this.skillPrepTimer -= dt;
-          if (this.skillPrepTimer <= 0) {
-            this.skillPhase = 'cast';
-            electricEffects.push(new ElectricEffect(this.x, this.y, this.enemy, this));
-          }
-          return;
-        }
-        if (this.skillPhase === 'cast') return;
-        this.skillCooldown -= dt;
-        if (this.skillCooldown <= 0 && this.enemy.alive) {
-          this.skillPhase = 'prep';
-          this.skillPrepTimer = HAMMER_SKILL_PREP_TIME;
-        }
-      }
-
-      onSkillComplete() {
-        this.skillPhase = 'none';
-        this.skillCooldown = HAMMER_SKILL_COOLDOWN;
+        this.enforceConstantSpeed();
       }
 
       update(dt) {
         if (!this.alive) return;
+
         this.damageCooldown = Math.max(0, this.damageCooldown - dt);
         this.faceLockTime = Math.max(0, this.faceLockTime - dt);
         if (this.attackTimer > 0) this.attackTimer -= dt;
         if (this.readyTimer > 0) this.readyTimer -= dt;
 
-        const wasParalyzed = this.isParalyzed();
-        if (this.paralyzeTimer > 0) {
-          this.paralyzeTimer -= dt;
-          this.vx = 0; this.vy = 0;
-          if (!wasParalyzed || this.paralyzeTimer <= 0) {
-            if (this.paralyzeTimer <= 0) this.giveInitialVelocity();
-          }
-        }
-
-        this.updateHammerSkill(dt);
-
-        if (!this.isParalyzed()) {
-          this.x += this.vx * dt;
-          this.y += this.vy * dt;
-          this.resolveWallBounce();
-          this.applyAntiStuck();
-        }
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.resolveWallBounce();
+        this.applyAntiStuck();
 
         if (this.faceLockTime > 0) {
           this.setFacingTowardEnemy();
-        } else if (this.attackTimer <= 0 && !this.isParalyzed() && Math.abs(this.vx) > 8) {
+        } else if (this.attackTimer <= 0 && Math.abs(this.vx) > 8) {
           this.facing = this.vx > 0 ? 'right' : 'left';
         }
+
+        this.walkPhase += dt * WALK_BOB_SPEED;
       }
 
       getPose() {
         if (!this.alive) return 'dead';
-        if (this.charId === 'hammer') {
-          if (this.skillPhase === 'prep') return 'skill_ready';
-          if (this.skillPhase === 'cast') return 'skill_cast';
-        }
-        if (this.isParalyzed()) return 'idle';
         if (this.attackTimer > 0) return this.attackPose;
 
-        const edx = this.enemy.x - this.x, edy = this.enemy.y - this.y;
+        const edx = this.enemy.x - this.x;
+        const edy = this.enemy.y - this.y;
         const dist = Math.hypot(edx, edy);
         const inRange = dist < CLOSE_RANGE && this.enemy.alive;
 
         if (inRange && !this.inCloseRange) {
-          if (this.charId === 'orc') {
-            this.readyPose = (edy > 20 && Math.abs(edx) < edy * 1.2) ? 'kick_ready' : 'weapon_ready';
-          } else {
-            this.readyPose = 'weapon_ready';
-          }
+          this.readyPose = (edy > 20 && Math.abs(edx) < edy * 1.2) ? 'kick_ready' : 'weapon_ready';
           this.readyTimer = READY_DISPLAY_TIME;
         }
         this.inCloseRange = inRange;
+
         if (this.readyTimer > 0) return this.readyPose;
         return 'walk';
       }
 
       setAttackPoseFromEnemy() {
-        if (this.charId === 'hammer' && this.skillPhase !== 'none') return;
-        const edx = this.enemy.x - this.x, edy = this.enemy.y - this.y;
-        const ax = Math.abs(edx), ay = Math.abs(edy);
-        if (this.charId === 'orc') {
-          if (edy > ay * 0.5 && edy > 10) {
-            this.attackPose = ax > ay * 0.6 ? 'kick_diag_down' : 'kick_down';
-          } else if (edy < -ay * 0.5 && edy < -10) {
-            this.attackPose = ax > ay * 0.6 ? 'attack_diag_up' : 'attack_up';
-          } else {
-            this.attackPose = 'attack_forward';
-          }
+        const edx = this.enemy.x - this.x;
+        const edy = this.enemy.y - this.y;
+        const ax = Math.abs(edx);
+        const ay = Math.abs(edy);
+
+        if (edy > ay * 0.5 && edy > 10) {
+          this.attackPose = ax > ay * 0.6 ? 'kick_diag_down' : 'kick_down';
+        } else if (edy < -ay * 0.5 && edy < -10) {
+          this.attackPose = ax > ay * 0.6 ? 'attack_diag_up' : 'attack_up';
         } else {
-          if (edy > ay * 0.5 && edy > 10) {
-            this.attackPose = ax > ay * 0.6 ? 'attack_diag_down' : 'attack_down';
-          } else if (edy < -ay * 0.5 && edy < -10) {
-            this.attackPose = ax > ay * 0.6 ? 'attack_diag_up' : 'attack_up';
-          } else {
-            this.attackPose = 'attack_forward';
-          }
+          this.attackPose = 'attack_forward';
         }
         this.attackTimer = ATTACK_DISPLAY_TIME;
       }
@@ -413,375 +357,318 @@
         this.faceLockTime = FACE_LOCK_TIME;
       }
 
-      takeDamage(amount, fromSkill) {
+      takeDamage(amount) {
         if (!this.alive || this.damageCooldown > 0) return false;
-        let dmg = amount;
-        if (this.isParalyzed()) dmg *= 2;
-        this.hp -= dmg;
+        this.hp -= amount;
         this.damageCooldown = DAMAGE_COOLDOWN;
         if (this.hp <= 0) {
           this.hp = 0;
           this.alive = false;
-          this.vx = 0; this.vy = 0;
-          this.paralyzeTimer = 0;
-          if (this.charId === 'hammer') this.skillPhase = 'none';
+          this.vx = 0;
+          this.vy = 0;
         }
         return true;
       }
 
       drawSprite() {
-        const center = worldToScreen(this.x, this.y);
-        const filename = this.getFilename();
+        const center = arenaToScreen(this.x, this.y);
         const img = this.getCurrentImage();
-        if (!img) {
-          ctx.fillStyle = this.playerIndex === 0 ? '#3d8b5e' : '#c45c26';
+
+        if (img) {
+          ensureFixedScale();
+          const fbScale = BASE_RENDER_HEIGHT / safeSize(img.naturalHeight, 100);
+          const scale = safeSize(fixedSpriteScale, fbScale);
+          let drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
+          let drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
+          let drawX = center.x - drawW / 2;
+          let drawY = center.y - drawH * 0.52;
+
+          try {
+            const info = getSpriteDrawInfo(img);
+            drawW = safeSize(info.drawW, drawW);
+            drawH = safeSize(info.drawH, drawH);
+            drawX = center.x - safeSize(info.anchorOffX, drawW / 2);
+            drawY = center.y - safeSize(info.anchorOffY, drawH * 0.52);
+            if (!isFinite(drawX)) drawX = center.x - drawW / 2;
+            if (!isFinite(drawY)) drawY = center.y - drawH * 0.52;
+            if (!Number.isFinite(drawX) || !Number.isFinite(drawY) || !Number.isFinite(drawW) || !Number.isFinite(drawH) || drawW <= 0 || drawH <= 0) {
+              drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
+              drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
+              drawX = center.x - drawW / 2;
+              drawY = center.y - drawH * 0.52;
+              ctx.drawImage(img, drawX, drawY, drawW, drawH);
+            } else if (info.ok && info.crop.sw > 0 && info.crop.sh > 0) {
+              ctx.drawImage(
+                img,
+                info.crop.sx, info.crop.sy, info.crop.sw, info.crop.sh,
+                drawX, drawY, drawW, drawH
+              );
+            } else {
+              ctx.drawImage(img, drawX, drawY, drawW, drawH);
+            }
+          } catch (e) {
+            drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
+            drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
+            drawX = center.x - drawW / 2;
+            drawY = center.y - drawH * 0.52;
+            ctx.drawImage(img, drawX, drawY, drawW, drawH);
+          }
+        } else {
+          ctx.save();
+          ctx.fillStyle = this.alive ? this.color : '#555';
           ctx.beginPath();
           ctx.ellipse(center.x, center.y, HITBOX_RADIUS * 0.7, HITBOX_RADIUS, 0, 0, Math.PI * 2);
           ctx.fill();
-          return;
+          ctx.restore();
         }
-        const sc = ensureCharScale(this.charId);
-        const ov = (this.cfg.scaleOverrides && this.cfg.scaleOverrides[filename]) || 1;
-        const baseScale = safeSize(sc && sc.scale, SPRITE_TARGET_HEIGHT / img.naturalHeight);
-        const scale = baseScale * ov;
-        let drawW, drawH, drawX, drawY;
-        try {
-          const info = getSpriteDrawInfo(img, this.charId, filename);
-          drawW = safeSize(info.drawW, img.naturalWidth * scale);
-          drawH = safeSize(info.drawH, img.naturalHeight * scale);
-          drawX = center.x - safeSize(info.anchorOffX, drawW / 2);
-          drawY = center.y - safeSize(info.anchorOffY, drawH * 0.52);
-          if (!Number.isFinite(drawX) || !Number.isFinite(drawY) || drawW <= 0 || drawH <= 0) {
-            drawW = img.naturalWidth * scale; drawH = img.naturalHeight * scale;
-            drawX = center.x - drawW / 2; drawY = center.y - drawH * 0.52;
-            ctx.drawImage(img, drawX, drawY, drawW, drawH);
-          } else if (info.ok && info.crop.sw > 0 && info.crop.sh > 0) {
-            ctx.drawImage(img, info.crop.sx, info.crop.sy, info.crop.sw, info.crop.sh, drawX, drawY, drawW, drawH);
-          } else {
-            ctx.drawImage(img, drawX, drawY, drawW, drawH);
-          }
-        } catch (e) {
-          drawW = img.naturalWidth * scale; drawH = img.naturalHeight * scale;
-          drawX = center.x - drawW / 2; drawY = center.y - drawH * 0.52;
-          ctx.drawImage(img, drawX, drawY, drawW, drawH);
-        }
+
       }
 
       drawHeadHPBar() {
         if (!this.alive) return;
-        const barW = 58, barH = 8;
-        const center = worldToScreen(this.x, this.y);
-        const barX = center.x - barW / 2;
-        const barY = center.y - HP_BAR_OFFSET_Y;
-        const pct = this.hp / this.maxHp;
-        const fillColor = this.isParalyzed() ? '#e6c200' : (this.playerIndex === 0 ? '#4caf50' : '#e8944a');
+        const barW = 52;
+        const barH = 7;
+        let hpX = this.x - barW / 2;
+        let hpY = this.y - HP_BAR_OFFSET_Y;
+        hpX = Math.max(4, Math.min(hpX, ARENA_VIEW_SIZE - barW - 4));
+        hpY = Math.max(visualArenaTop + 6, hpY);
+        const sx = VIEW_LEFT + hpX;
+        const sy = VIEW_TOP + hpY;
+        const pct = this.hp / MAX_HP;
         ctx.fillStyle = '#000';
-        ctx.fillRect(barX, barY, barW, barH);
-        ctx.fillStyle = fillColor;
-        ctx.fillRect(barX, barY, barW * pct, barH);
-        ctx.fillStyle = '#f2ecff';
-        ctx.font = 'bold 9px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(Math.ceil(this.hp) + '/' + this.maxHp, center.x, barY - 3);
+        ctx.fillRect(sx, sy, barW, barH);
+        ctx.fillStyle = '#4caf50';
+        ctx.fillRect(sx, sy, barW * pct, barH);
       }
     }
 
-    class ElectricEffect {
-      constructor(x, y, target, owner) {
-        this.x = x; this.y = y;
-        this.target = target;
-        this.owner = owner;
-        this.alive = true;
-        this.img = getImage('assets/sprites/hammer/hammer_electric_effect.png');
+    function triggerHitScreenCamera() {
+      screenCamera.shakeTime = 0.12;
+      screenCamera.shakePower = 3;
+      screenCamera.hitPulse = 0.03;
+    }
+
+    function triggerDeathScreenCamera() {
+      screenCamera.shakeTime = 0.18;
+      screenCamera.shakePower = 4;
+      screenCamera.hitPulse = 0.04;
+    }
+
+    function updateScreenCamera(dt) {
+      const alive = [];
+      if (orcA.alive) alive.push(orcA);
+      if (orcB.alive) alive.push(orcB);
+      let targetPanX = 0, targetPanY = 0;
+      if (alive.length > 0) {
+        let midX = 0, midY = 0;
+        for (const u of alive) { midX += u.x; midY += u.y; }
+        midX /= alive.length;
+        midY /= alive.length;
+        const arenaMid = ARENA_VIEW_SIZE / 2;
+        targetPanX = (midX - arenaMid) * 0.12;
+        targetPanY = (midY - arenaMid) * 0.12;
       }
-      update(dt) {
-        if (!this.alive) return;
-        if (!this.target.alive || !this.owner.alive) {
-          this.alive = false;
-          if (this.owner.skillPhase === 'cast') this.owner.onSkillComplete();
-          return;
-        }
-        const dx = this.target.x - this.x, dy = this.target.y - this.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist < HITBOX_RADIUS) {
-          this.target.takeDamage(HAMMER_SKILL_DAMAGE, true);
-          this.target.applyParalyze(PARALYZE_DURATION);
-          this.alive = false;
-          this.owner.onSkillComplete();
-          return;
-        }
-        this.x += (dx / dist) * ELECTRIC_SPEED * dt;
-        this.y += (dy / dist) * ELECTRIC_SPEED * dt;
+      targetPanX = Math.max(-MAX_SCREEN_PAN, Math.min(MAX_SCREEN_PAN, targetPanX));
+      targetPanY = Math.max(-MAX_SCREEN_PAN, Math.min(MAX_SCREEN_PAN, targetPanY));
+      screenCamera.x += (targetPanX - screenCamera.x) * SCREEN_CAMERA_LERP;
+      screenCamera.y += (targetPanY - screenCamera.y) * SCREEN_CAMERA_LERP;
+
+      let targetZoom = 1.0 + screenCamera.hitPulse;
+      if (alive.length === 2) {
+        const dist = Math.hypot(orcB.x - orcA.x, orcB.y - orcA.y);
+        if (dist < CLOSE_RANGE) targetZoom += (1 - dist / CLOSE_RANGE) * 0.025;
       }
-      draw() {
-        if (!this.alive) return;
-        const p = worldToScreen(this.x, this.y);
-        const img = this.img;
-        const sz = ELECTRIC_EFFECT_SIZE;
-        if (img) ctx.drawImage(img, p.x - sz / 2, p.y - sz / 2, sz, sz);
-        else {
-          ctx.fillStyle = '#88f';
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, sz / 2, 0, Math.PI * 2);
-          ctx.fill();
-        }
+      targetZoom = Math.min(1.04, targetZoom);
+      screenCamera.zoom += (targetZoom - screenCamera.zoom) * 0.08;
+      screenCamera.hitPulse = Math.max(0, screenCamera.hitPulse - dt * 0.35);
+      screenCamera.shakeTime = Math.max(0, screenCamera.shakeTime - dt);
+
+      let shakeX = 0, shakeY = 0;
+      if (screenCamera.shakeTime > 0) {
+        const fade = screenCamera.shakeTime / 0.18;
+        const p = screenCamera.shakePower * fade;
+        shakeX = (Math.random() - 0.5) * 2 * p;
+        shakeY = (Math.random() - 0.5) * 2 * p;
       }
+      gameWrap.style.transform = 'translate(' + (screenCamera.x + shakeX) + 'px,' + (screenCamera.y + shakeY) + 'px) scale(' + screenCamera.zoom + ')';
+    }
+
+    function resetScreenCamera() {
+      screenCamera.x = 0;
+      screenCamera.y = 0;
+      screenCamera.zoom = 1;
+      screenCamera.shakeTime = 0;
+      screenCamera.shakePower = 0;
+      screenCamera.hitPulse = 0;
+      gameWrap.style.transform = '';
     }
 
     function resolveBodyCollision(a, b) {
-      if (!a.alive || !b.alive) return;
-      const dx = b.x - a.x, dy = b.y - a.y;
+      if (!a.alive || !b.alive || a.hp <= 0 || b.hp <= 0) return;
+
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
       const dist = Math.hypot(dx, dy);
       const minDist = HITBOX_RADIUS * 2;
       if (dist >= minDist || dist === 0) return;
-      const nx = dx / dist, ny = dy / dist;
+
+      const nx = dx / dist;
+      const ny = dy / dist;
       const overlap = minDist - dist;
 
-      const aPar = a.isParalyzed(), bPar = b.isParalyzed();
-      if (aPar && bPar) return;
+      a.x -= nx * overlap * 0.5;
+      a.y -= ny * overlap * 0.5;
+      b.x += nx * overlap * 0.5;
+      b.y += ny * overlap * 0.5;
 
-      if (aPar && !bPar) {
-        b.x += nx * overlap;
-        b.y += ny * overlap;
-        const relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
-        if (relVn < 0) {
-          const v2n = b.vx * nx + b.vy * ny;
-          b.vx += (-v2n) * nx * 2; b.vy += (-v2n) * ny * 2;
-        }
-        const bn = normalizeSpeed(b.vx, b.vy, MOVE_SPEED);
-        b.vx = bn.vx; b.vy = bn.vy;
-        b.applyAntiStuck();
-        if (a.takeDamage(b.damage)) {
-          b.lockFacingOnHit();
-          if (b.skillPhase === 'none') b.setAttackPoseFromEnemy();
-        }
-        return;
-      }
-      if (!aPar && bPar) {
-        a.x -= nx * overlap;
-        a.y -= ny * overlap;
-        const relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
-        if (relVn < 0) {
-          const v1n = a.vx * nx + a.vy * ny;
-          a.vx += (-v1n) * nx * 2; a.vy += (-v1n) * ny * 2;
-        }
-        const an = normalizeSpeed(a.vx, a.vy, MOVE_SPEED);
-        a.vx = an.vx; a.vy = an.vy;
-        a.applyAntiStuck();
-        if (b.takeDamage(a.damage)) {
-          a.lockFacingOnHit();
-          if (a.skillPhase === 'none') a.setAttackPoseFromEnemy();
-        }
-        return;
-      }
-
-      a.x -= nx * overlap * 0.5; a.y -= ny * overlap * 0.5;
-      b.x += nx * overlap * 0.5; b.y += ny * overlap * 0.5;
       const relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
       if (relVn < 0) {
-        const v1n = a.vx * nx + a.vy * ny, v2n = b.vx * nx + b.vy * ny;
-        a.vx += (v2n - v1n) * nx; a.vy += (v2n - v1n) * ny;
-        b.vx += (v1n - v2n) * nx; b.vy += (v1n - v2n) * ny;
+        const v1n = a.vx * nx + a.vy * ny;
+        const v2n = b.vx * nx + b.vy * ny;
+        a.vx += (v2n - v1n) * nx;
+        a.vy += (v2n - v1n) * ny;
+        b.vx += (v1n - v2n) * nx;
+        b.vy += (v1n - v2n) * ny;
       }
-      const an = normalizeSpeed(a.vx, a.vy, MOVE_SPEED);
-      const bn = normalizeSpeed(b.vx, b.vy, MOVE_SPEED);
+
+      const an = normalizeSpeed(a.vx, a.vy, UNIT_SPEED);
+      const bn = normalizeSpeed(b.vx, b.vy, UNIT_SPEED);
       a.vx = an.vx; a.vy = an.vy;
       b.vx = bn.vx; b.vy = bn.vy;
-      a.applyAntiStuck(); b.applyAntiStuck();
+      a.applyAntiStuck();
+      b.applyAntiStuck();
 
-      const aDmg = a.takeDamage(b.damage), bDmg = b.takeDamage(a.damage);
-      if (aDmg || bDmg) {
-        a.lockFacingOnHit(); b.lockFacingOnHit();
-        if (a.skillPhase === 'none') a.setAttackPoseFromEnemy();
-        if (b.skillPhase === 'none') b.setAttackPoseFromEnemy();
+      const aAliveBefore = a.alive;
+      const bAliveBefore = b.alive;
+      const aDamaged = a.takeDamage(DAMAGE);
+      const bDamaged = b.takeDamage(DAMAGE);
+      if (aDamaged || bDamaged) {
+        a.lockFacingOnHit();
+        b.lockFacingOnHit();
+        a.setAttackPoseFromEnemy();
+        b.setAttackPoseFromEnemy();
+        triggerHitScreenCamera();
       }
+      if ((aAliveBefore && !a.alive) || (bAliveBefore && !b.alive)) triggerDeathScreenCamera();
     }
 
-    function updateWorldCamera(dt) {
-      const cx = ARENA_WORLD_SIZE / 2, cy = ARENA_WORLD_SIZE / 2;
-      let target = null, maxDist = -1;
-      for (const f of [fighterA, fighterB]) {
-        if (!f || !f.alive) continue;
-        const d = Math.hypot(f.x - cx, f.y - cy);
-        if (d > maxDist) { maxDist = d; target = f; }
-      }
-      let tx, ty;
-      const maxCam = ARENA_WORLD_SIZE - ARENA_VIEW_SIZE;
-      if (target && maxDist > 50) {
-        tx = target.x - ARENA_VIEW_SIZE / 2;
-        ty = target.y - ARENA_VIEW_SIZE / 2;
-      } else {
-        tx = cx - ARENA_VIEW_SIZE / 2;
-        ty = cy - ARENA_VIEW_SIZE / 2;
-      }
-      tx = Math.max(0, Math.min(maxCam, tx));
-      ty = Math.max(0, Math.min(maxCam, ty));
-      camera.x += (tx - camera.x) * CAMERA_LERP;
-      camera.y += (ty - camera.y) * CAMERA_LERP;
+    function drawBottomHPText(y) {
+      ctx.fillStyle = '#f2ecff';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('Green Orc  ' + Math.ceil(orcA.hp) + ' / ' + MAX_HP, 24, y);
+      ctx.textAlign = 'right';
+      ctx.fillText('Orange Orc  ' + Math.ceil(orcB.hp) + ' / ' + MAX_HP, GAME_WIDTH - 24, y);
     }
 
-    function drawSelectScreen() {
+    function drawFixedUI() {
       ctx.fillStyle = '#151020';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
       ctx.fillStyle = '#f2ecff';
       ctx.font = 'bold 38px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('ORC BATTLE', GAME_WIDTH / 2, 80);
-      ctx.font = 'bold 18px sans-serif';
+      ctx.fillText('ORC BATTLE', GAME_WIDTH / 2, 46);
+
+      ctx.font = 'bold 14px sans-serif';
       ctx.fillStyle = '#c7b8e8';
-      ctx.fillText('CHARACTER SELECT', GAME_WIDTH / 2, 120);
-      ctx.font = 'bold 16px sans-serif';
-      ctx.fillStyle = '#4caf50';
-      ctx.fillText('P1: ' + CHARACTERS[p1Choice].name, GAME_WIDTH / 2, 200);
-      ctx.fillStyle = '#e8944a';
-      ctx.fillText('P2: ' + CHARACTERS[p2Choice].name, GAME_WIDTH / 2, 240);
+      ctx.fillText('GREEN ORC', GAME_WIDTH / 2 - 72, 82);
+      ctx.fillText('VS', GAME_WIDTH / 2, 82);
+      ctx.fillText('ORANGE ORC', GAME_WIDTH / 2 + 72, 82);
+
       ctx.fillStyle = '#c7b8e8';
-      ctx.font = '14px sans-serif';
-      const lines = [
-        'P1 — 1: Orc   2: Hammer',
-        'P2 — Q: Orc   W: Hammer',
-        'Enter — Start Battle',
-        'Esc — (on battle) Return here'
-      ];
-      lines.forEach((t, i) => ctx.fillText(t, GAME_WIDTH / 2, 340 + i * 28));
+      ctx.font = '11px sans-serif';
+      ctx.fillText('Press R to restart', GAME_WIDTH / 2, GAME_HEIGHT - 12);
     }
 
-    function drawTopUI() {
-      ctx.fillStyle = '#f2ecff';
-      ctx.font = 'bold 32px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('ORC BATTLE', GAME_WIDTH / 2, 42);
-      ctx.font = 'bold 13px sans-serif';
-      ctx.fillStyle = '#4caf50';
-      ctx.fillText(fighterA.name.toUpperCase(), GAME_WIDTH / 2 - 80, 72);
-      ctx.fillStyle = '#c7b8e8';
-      ctx.fillText('VS', GAME_WIDTH / 2, 72);
-      ctx.fillStyle = '#e8944a';
-      ctx.fillText(fighterB.name.toUpperCase(), GAME_WIDTH / 2 + 80, 72);
-    }
+    function drawArenaWorld() {
+      const visTop = VIEW_TOP - ARENA_VISUAL_EXTRA_Y;
+      const visH = ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y * 2;
 
-    function drawWorld() {
       ctx.save();
       ctx.beginPath();
-      ctx.rect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
+      ctx.rect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
       ctx.clip();
 
       ctx.fillStyle = '#2a2138';
-      ctx.fillRect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
+      ctx.fillRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
 
       const tile = 60;
-      const wx0 = Math.floor(camera.x / tile) * tile;
-      const wx1 = camera.x + ARENA_VIEW_SIZE;
-      const wy0 = Math.floor(camera.y / tile) * tile;
-      const wy1 = camera.y + ARENA_VIEW_SIZE;
       ctx.strokeStyle = 'rgba(190, 160, 255, 0.08)';
       ctx.lineWidth = 1;
-      for (let wx = wx0; wx <= wx1; wx += tile) {
-        const sx = VIEW_LEFT + wx - camera.x;
-        ctx.beginPath(); ctx.moveTo(sx, VIEW_TOP); ctx.lineTo(sx, VIEW_TOP + ARENA_VIEW_SIZE); ctx.stroke();
+      for (let x = 0; x <= ARENA_VIEW_SIZE; x += tile) {
+        const sx = VIEW_LEFT + x;
+        ctx.beginPath();
+        ctx.moveTo(sx, visTop);
+        ctx.lineTo(sx, visTop + visH);
+        ctx.stroke();
       }
-      for (let wy = wy0; wy <= wy1; wy += tile) {
-        const sy = VIEW_TOP + wy - camera.y;
-        ctx.beginPath(); ctx.moveTo(VIEW_LEFT, sy); ctx.lineTo(VIEW_LEFT + ARENA_VIEW_SIZE, sy); ctx.stroke();
+      for (let y = -ARENA_VISUAL_EXTRA_Y; y <= ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y; y += tile) {
+        const sy = VIEW_TOP + y;
+        ctx.beginPath();
+        ctx.moveTo(VIEW_LEFT, sy);
+        ctx.lineTo(VIEW_LEFT + ARENA_VIEW_SIZE, sy);
+        ctx.stroke();
       }
+
       ctx.restore();
 
-      fighterA.drawSprite();
-      fighterB.drawSprite();
-      for (const e of electricEffects) e.draw();
-      fighterA.drawHeadHPBar();
-      fighterB.drawHeadHPBar();
+      orcA.drawSprite();
+      orcB.drawSprite();
+
+      orcA.drawHeadHPBar();
+      orcB.drawHeadHPBar();
 
       ctx.strokeStyle = '#a98ee8';
       ctx.lineWidth = 5;
-      ctx.strokeRect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
+      ctx.strokeRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
       ctx.strokeStyle = '#b89cff';
       ctx.lineWidth = 2;
-      ctx.strokeRect(VIEW_LEFT + 3, VIEW_TOP + 3, ARENA_VIEW_SIZE - 6, ARENA_VIEW_SIZE - 6);
+      ctx.strokeRect(VIEW_LEFT + 3, visTop + 3, ARENA_VIEW_SIZE - 6, visH - 6);
+
+      const visBottom = VIEW_TOP + ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y;
+      ctx.fillStyle = '#140f20';
+      ctx.fillRect(0, visBottom, GAME_WIDTH, GAME_HEIGHT - visBottom);
+
+      drawBottomHPText(VIEW_TOP + ARENA_VIEW_SIZE + 36);
     }
 
-    function drawWinner() {
-      if (!matchEnded) return;
-      let text = '';
-      if (fighterA.alive && !fighterB.alive) text = fighterA.name.toUpperCase() + ' WINS!';
-      else if (fighterB.alive && !fighterA.alive) text = fighterB.name.toUpperCase() + ' WINS!';
-      else if (!fighterA.alive && !fighterB.alive) text = 'DRAW';
-      if (!text) return;
-      ctx.fillStyle = 'rgba(14, 10, 22, 0.55)';
-      ctx.fillRect(VIEW_LEFT, VIEW_TOP, ARENA_VIEW_SIZE, ARENA_VIEW_SIZE);
-      ctx.fillStyle = '#f2ecff';
-      ctx.font = 'bold 26px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(text, GAME_WIDTH / 2, VIEW_TOP + ARENA_VIEW_SIZE / 2);
-    }
+    let orcA, orcB;
+    let lastTime = 0;
 
-    function startBattle() {
-      const mid = ARENA_WORLD_SIZE / 2;
-      fighterA = new Fighter(mid - 120, mid, p1Choice, 0, null);
-      fighterB = new Fighter(mid + 120, mid, p2Choice, 1, null);
-      fighterA.enemy = fighterB;
-      fighterB.enemy = fighterA;
-      fighterA.giveInitialVelocity();
-      fighterB.giveInitialVelocity();
-      electricEffects = [];
-      camera.x = mid - ARENA_VIEW_SIZE / 2;
-      camera.y = mid - ARENA_VIEW_SIZE / 2;
-      matchEnded = false;
-      gameState = 'battle';
-    }
-
-    function restartBattle() {
-      if (gameState === 'battle') startBattle();
-    }
-
-    function updateMatchEnd() {
-      if (!fighterA.alive || !fighterB.alive) matchEnded = true;
+    function initGame() {
+      const mid = ARENA_VIEW_SIZE / 2;
+      orcA = new Orc(mid - 100, mid, '#3d8b5e', 'Green Orc');
+      orcB = new Orc(mid + 100, mid, '#c45c26', 'Orange Orc');
+      orcA.enemy = orcB;
+      orcB.enemy = orcA;
+      orcA.giveInitialVelocity();
+      orcB.giveInitialVelocity();
+      resetScreenCamera();
     }
 
     function gameLoop(timestamp) {
       const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
       lastTime = timestamp;
 
-      if (gameState === 'select') {
-        drawSelectScreen();
-      } else {
-        fighterA.update(dt);
-        fighterB.update(dt);
-        resolveBodyCollision(fighterA, fighterB);
-        electricEffects = electricEffects.filter(e => e.alive);
-        for (const e of electricEffects) e.update(dt);
-        updateWorldCamera(dt);
-        updateMatchEnd();
+      orcA.update(dt);
+      orcB.update(dt);
+      resolveBodyCollision(orcA, orcB);
+      updateScreenCamera(dt);
 
-        ctx.fillStyle = '#151020';
-        ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-        drawTopUI();
-        drawWorld();
-        drawWinner();
-        ctx.fillStyle = '#c7b8e8';
-        ctx.font = '11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('R: Restart   Esc: Select', GAME_WIDTH / 2, GAME_HEIGHT - 12);
-      }
+      drawFixedUI();
+      drawArenaWorld();
 
       requestAnimationFrame(gameLoop);
     }
 
     window.addEventListener('keydown', (e) => {
-      if (gameState === 'select') {
-        if (e.key === '1') p1Choice = 'orc';
-        if (e.key === '2') p1Choice = 'hammer';
-        if (e.key === 'q' || e.key === 'Q') p2Choice = 'orc';
-        if (e.key === 'w' || e.key === 'W') p2Choice = 'hammer';
-        if (e.key === 'Enter') startBattle();
-      } else {
-        if (e.key === 'Escape') { gameState = 'select'; matchEnded = false; }
-        if (e.key === 'r' || e.key === 'R') restartBattle();
-      }
+      if (e.key === 'r' || e.key === 'R') initGame();
     });
 
     loadAllImages();
-    requestAnimationFrame(t => { lastTime = t; gameLoop(t); });
+    initGame();
+    requestAnimationFrame((t) => { lastTime = t; gameLoop(t); });
   </script>
 </body>
 </html>
