@@ -89,19 +89,19 @@
         id: 'hammer', displayName: 'Hammer Mage', path: 'assets/sprites/hammer/',
         maxHp: 60, damage: 7,
         files: [
-          'left_idle.png','left_walk.png','left_weapon_ready.png',
-          'left_attack_forward.png','left_attack_up.png','left_attack_diag_up.png',
-          'left_attack_diag_down.png','left_attack_down.png',
-          'right_idle.png','right_walk.png','right_weapon_ready.png',
-          'right_attack_forward.png','right_attack_up.png','right_attack_diag_up.png',
-          'right_attack_diag_down.png','right_attack_down.png',
-          'dead.png','skill_ready.png','skill_cast.png','electric_effect.png'
+          'hammer_left_idle.png','hammer_left_walk.png','hammer_left_weapon_ready.png',
+          'hammer_left_attack_forward.png','hammer_left_attack_up.png','hammer_left_attack_diag_up.png',
+          'hammer_left_attack_diag_down.png','hammer_left_attack_down.png',
+          'hammer_right_idle.png','hammer_right_walk.png','hammer_right_weapon_ready.png',
+          'hammer_right_attack_forward.png','hammer_right_attack_up.png','hammer_right_attack_diag_up.png',
+          'hammer_right_attack_diag_down.png','hammer_right_attack_down.png',
+          'hammer_dead.png','hammer_skill_ready.png','hammer_skill_cast.png','hammer_electric_effect.png'
         ],
         poseFile(pose, facing) {
-          if (pose === 'dead') return 'dead.png';
-          if (pose === 'skill_ready') return 'skill_ready.png';
-          if (pose === 'skill_cast') return 'skill_cast.png';
-          return facing + '_' + pose + '.png';
+          if (pose === 'dead') return 'hammer_dead.png';
+          if (pose === 'skill_ready') return 'hammer_skill_ready.png';
+          if (pose === 'skill_cast') return 'hammer_skill_cast.png';
+          return 'hammer_' + facing + '_' + pose + '.png';
         }
       }
     };
@@ -206,7 +206,7 @@
         for (const name of cfg.files) {
           const key = cfg.path + name;
           const img = new Image();
-          img.onerror = () => { img._failed = true; };
+          img.onerror = () => { img._failed = true; console.warn('Missing sprite:', key); };
           img.src = key;
           images[key] = img;
         }
@@ -571,7 +571,7 @@
       draw() {
         if (!this.alive) return;
         const p = arenaToScreen(this.x, this.y);
-        const img = getImage('assets/sprites/hammer/electric_effect.png');
+        const img = getImage('assets/sprites/hammer/hammer_electric_effect.png');
         if (img) ctx.drawImage(img, p.x - ELECTRIC_SIZE / 2, p.y - ELECTRIC_SIZE / 2, ELECTRIC_SIZE, ELECTRIC_SIZE);
         else {
           ctx.fillStyle = '#88f';
