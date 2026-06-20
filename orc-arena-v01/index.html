@@ -75,24 +75,15 @@
       return 1; // Blue Orc and all other frames: stable 1.0 base
     }
 
-    const arenaTop         = 0;
-    const arenaBottom      = ARENA_VIEW_SIZE;
-    const visualArenaTop   = arenaTop - ARENA_VISUAL_EXTRA_Y;
-    const visualArenaBottom = arenaBottom + ARENA_VISUAL_EXTRA_Y;
     const HP_BAR_OFFSET_Y  = HITBOX_RADIUS + 36;
 
     const UNIT_SPEED          = 220;
-    const MIN_WALL_BOUNCE     = UNIT_SPEED * 0.55;
     const WALL_EPS            = 0.75;
     const FACE_LOCK_TIME      = 0.5;
-    const DAMAGE              = 8;
     const DAMAGE_COOLDOWN     = 0.6;
     const ATTACK_DISPLAY_TIME = 0.15;
     const ORC_KICK_ATTACK_ANIM_TIME = 0.2;
 
-    const MAX_HP             = 100;
-    const WALK_BOB_AMPLITUDE = 3;
-    const WALK_BOB_SPEED     = 10;
     const CLOSE_RANGE        = 95;
     const READY_DISPLAY_TIME = 0.5;
 
@@ -294,6 +285,14 @@
       return null;
     }
 
+    function pickDirectionalAttackPose(edx, edy, downPose, diagDownPose) {
+      const ax = Math.abs(edx);
+      const ay = Math.abs(edy);
+      if (edy > ay * 0.5 && edy > 10) return ax > ay * 0.6 ? diagDownPose : downPose;
+      if (edy < -ay * 0.5 && edy < -10) return ax > ay * 0.6 ? 'attack_diag_up' : 'attack_up';
+      return 'attack_forward';
+    }
+
     function normalizeSpeed(vx, vy, target) {
       const s = Math.hypot(vx, vy);
       if (s < 1) {
@@ -408,7 +407,6 @@
         this.readyTimer = 0;
         this.readyPose = 'weapon_ready';
         this.inCloseRange = false;
-        this.walkPhase = Math.random() * Math.PI * 2;
         this.paralyzeTimer = 0;
         this.savedVx = 0;
         this.savedVy = 0;
@@ -586,24 +584,10 @@
       setAttackPoseFromDirection() {
         const edx = this.enemy.x - this.x;
         const edy = this.enemy.y - this.y;
-        const ax = Math.abs(edx);
-        const ay = Math.abs(edy);
         if (this.charId === 'orc') {
-          if (edy > ay * 0.5 && edy > 10) {
-            this.attackPose = ax > ay * 0.6 ? 'kick_diag_down' : 'kick_down';
-          } else if (edy < -ay * 0.5 && edy < -10) {
-            this.attackPose = ax > ay * 0.6 ? 'attack_diag_up' : 'attack_up';
-          } else {
-            this.attackPose = 'attack_forward';
-          }
+          this.attackPose = pickDirectionalAttackPose(edx, edy, 'kick_down', 'kick_diag_down');
         } else {
-          if (edy > ay * 0.5 && edy > 10) {
-            this.attackPose = ax > ay * 0.6 ? 'attack_diag_down' : 'attack_down';
-          } else if (edy < -ay * 0.5 && edy < -10) {
-            this.attackPose = ax > ay * 0.6 ? 'attack_diag_up' : 'attack_up';
-          } else {
-            this.attackPose = 'attack_forward';
-          }
+          this.attackPose = pickDirectionalAttackPose(edx, edy, 'attack_down', 'attack_diag_down');
         }
       }
 
@@ -646,8 +630,7 @@
         if (this.skillPhase === 'prep') {
           if (this.skillTimer >= SILVER_SKULL_SKILL_PREP) {
             this.skillPhase = 'active';
-            this.setAttackPoseFromDirection();
-            this.skillAttackPose = this.attackPose;
+            this.updateSilverThrustAim();
             this.spawnThrustEffect();
           }
           return;
@@ -722,11 +705,11 @@
 
         if (this.faceLockTime > 0) {
           this.setFacingTowardEnemy();
-        } else if (this.attackTimer <= 0 && !this.isParalyzed() && Math.abs(this.vx) > 8) {
+        } else if (this.attackTimer <= 0 && !this.isParalyzed() && !this.isThrustingSkill() && Math.abs(this.vx) > 8) {
           this.facing = this.vx > 0 ? 'right' : 'left';
         }
 
-        this.walkPhase += dt * WALK_BOB_SPEED;
+        if (this.isThrustingSkill()) this.updateSilverThrustAim();
       }
 
       getPose() {
@@ -848,7 +831,7 @@
         let hpX = this.x - barW / 2;
         let hpY = this.y - HP_BAR_OFFSET_Y;
         hpX = Math.max(4, Math.min(hpX, ARENA_VIEW_SIZE - barW - 4));
-        hpY = Math.max(visualArenaTop + 6, hpY);
+        hpY = Math.max(-ARENA_VISUAL_EXTRA_Y + 6, hpY);
         const sx = VIEW_LEFT + hpX;
         const sy = VIEW_TOP + hpY;
         const pct = this.hp / this.maxHp;
@@ -899,8 +882,9 @@
       draw() {
         if (!this.alive) return;
         const alpha = Math.max(0, this.life / SILVER_THRUST_EFFECT_LIFE);
-        const fname = 'silver_skull_' + this.facing + '_thrust_effect.png';
-        const img = getImage('assets/sprites/silver_skull/' + fname);
+        const facing = (this.owner && this.owner.alive) ? this.owner.facing : this.facing;
+        const fname = 'silver_skull_' + facing + '_thrust_effect.png';
+        const img = getImage(CHARACTERS.silver_skull.path + fname);
         const p = arenaToScreen(this.x, this.y);
         const size = 64;
         ctx.save();
@@ -942,7 +926,7 @@
       draw() {
         if (!this.alive) return;
         const p = arenaToScreen(this.x, this.y);
-        const img = getImage('assets/sprites/hammer/hammer_electric_effect.png');
+        const img = getImage(CHARACTERS.hammer.path + 'hammer_electric_effect.png');
         if (img) ctx.drawImage(img, p.x - ELECTRIC_SIZE / 2, p.y - ELECTRIC_SIZE / 2, ELECTRIC_SIZE, ELECTRIC_SIZE);
         else {
           ctx.fillStyle = '#ffd84a';
@@ -1175,7 +1159,8 @@
 
     function drawFighterBottomRow(f, x, y, align) {
       const hpText = f.name + '  ' + Math.ceil(f.hp) + ' / ' + f.maxHp;
-      const skillText = 'Skill: ' + getSkillStatus(f);
+      const skillStatus = getSkillStatus(f);
+      const skillText = 'Skill: ' + skillStatus;
       ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = align;
       ctx.fillStyle = '#1f2430';
@@ -1186,7 +1171,7 @@
       const gap = 10;
       const pillX = align === 'left' ? x + hpW + gap : x - hpW - gap - skillW;
       const pillY = y - 13;
-      const ready = getSkillStatus(f) === 'READY';
+      const ready = skillStatus === 'READY';
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(pillX, pillY, skillW, pillH);
       ctx.strokeStyle = ready ? f.cfg.damageColor : '#b0b6c0';
