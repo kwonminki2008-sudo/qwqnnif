@@ -543,6 +543,14 @@
           this.triggerBlock(source);
           return;
         }
+        if (this.charId === 'silver_skull') {
+          this.blockTimer = 0;
+          if (this.skillPhase !== 'none') {
+            this.skillPhase = 'none';
+            this.skillTimer = 0;
+            removeEffectsForOwner(this);
+          }
+        }
         if (this.paralyzeTimer <= 0) {
           this.savedVx = this.vx;
           this.savedVy = this.vy;
@@ -596,6 +604,26 @@
           } else {
             this.attackPose = 'attack_forward';
           }
+        }
+      }
+
+      updateSilverThrustAim() {
+        if (!this.enemy || !this.enemy.alive) return;
+        const dx = this.enemy.x - this.x;
+        const dy = this.enemy.y - this.y;
+        this.facing = dx < 0 ? 'left' : 'right';
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+        if (absDy < 18 || absDx > absDy * 1.6) {
+          this.skillAttackPose = 'attack_forward';
+        } else if (dy < 0 && absDx < absDy * 0.65) {
+          this.skillAttackPose = 'attack_up';
+        } else if (dy < 0) {
+          this.skillAttackPose = 'attack_diag_up';
+        } else if (dy > 0 && absDx < absDy * 0.65) {
+          this.skillAttackPose = 'attack_down';
+        } else {
+          this.skillAttackPose = 'attack_diag_down';
         }
       }
 
@@ -703,6 +731,7 @@
 
       getPose() {
         if (!this.alive) return 'dead';
+        if (this.isParalyzed()) return 'idle';
         if (this.charId === 'hammer') {
           if (this.skillPhase === 'prep') return 'skill_ready';
           if (this.skillPhase === 'cast') return 'skill_cast';
@@ -715,7 +744,6 @@
             return this.blockSide === 'left' ? 'skill_block_left' : 'skill_block_right';
           }
         }
-        if (this.isParalyzed()) return 'idle';
         if (this.attackTimer > 0) return this.attackPose;
 
         const edx = this.enemy.x - this.x;
@@ -743,7 +771,9 @@
       setAttackPoseFromEnemy() {
         if (this.isInSkillState() || this.isThrustingSkill()) return;
         this.setAttackPoseFromDirection();
-        this.attackTimer = ATTACK_DISPLAY_TIME;
+        const isOrcKick = this.charId === 'orc' &&
+          (this.attackPose === 'kick_down' || this.attackPose === 'kick_diag_down');
+        this.attackTimer = isOrcKick ? ORC_KICK_ATTACK_ANIM_TIME : ATTACK_DISPLAY_TIME;
       }
 
       lockFacingOnHit() {
