@@ -103,7 +103,9 @@
     const ELECTRIC_SIZE = 48;
 
     const SILVER_BLOCKS_REQUIRED_FOR_SKILL = 3;
-    const SILVER_BLOCK_REENGAGE_BLEND = 0.35;
+    const SILVER_SKILL_READY_DELAY = 0.45;
+    const SILVER_BLOCK_SPEED_BOOST = 1.8;
+    const SILVER_BLOCK_BOOST_DURATION = 0.4;
     const SILVER_SKULL_SKILL_DURATION = 0.7;
     const SILVER_SKULL_SKILL_PREP = 0.25;
     const SILVER_SKULL_SKILL_ACTIVE = 0.18;
@@ -418,7 +420,9 @@
         this.skillAttackPose = 'attack_forward';
         this.silverBlockCount = 0;
         this.silverSkillReady = false;
+        this.silverSkillArmTimer = 0;
         this.blockTimer = 0;
+        this.blockBoostTimer = 0;
         this.blockSide = 'left';
         this.blockUp = false;
       }
@@ -441,7 +445,20 @@
         this.blockUp = dy < -10;
         this.blockTimer = SILVER_BLOCK_DURATION;
         this.silverBlockCount = Math.min(this.silverBlockCount + 1, SILVER_BLOCKS_REQUIRED_FOR_SKILL);
-        if (this.silverBlockCount >= SILVER_BLOCKS_REQUIRED_FOR_SKILL) this.silverSkillReady = true;
+        if (this.silverBlockCount >= SILVER_BLOCKS_REQUIRED_FOR_SKILL) {
+          this.silverSkillReady = false;
+          this.silverSkillArmTimer = SILVER_SKILL_READY_DELAY;
+        }
+        this.blockBoostTimer = SILVER_BLOCK_BOOST_DURATION;
+        if (Math.hypot(this.vx, this.vy) < 1) this.giveInitialVelocity();
+        this.enforceConstantSpeed();
+      }
+
+      getEffectiveSpeed() {
+        if (this.charId === 'silver_skull' && this.blockBoostTimer > 0) {
+          return this.speed * SILVER_BLOCK_SPEED_BOOST;
+        }
+        return this.speed;
       }
 
       isParalyzed() { return this.paralyzeTimer > 0; }
@@ -467,12 +484,12 @@
       }
 
       enforceConstantSpeed() {
-        const n = normalizeSpeed(this.vx, this.vy, this.speed);
+        const n = normalizeSpeed(this.vx, this.vy, this.getEffectiveSpeed());
         this.vx = n.vx;
         this.vy = n.vy;
       }
 
-      minWallBounce() { return this.speed * 0.55; }
+      minWallBounce() { return this.getEffectiveSpeed() * 0.55; }
 
       resolveWallBounce() {
         const r = HITBOX_RADIUS;
@@ -505,8 +522,8 @@
           const s = Math.hypot(this.vx, this.vy);
           if (!isFinite(this.vx) || !isFinite(this.vy) || s < 1) {
             const a = Math.random() * Math.PI * 2;
-            this.vx = Math.cos(a) * this.speed;
-            this.vy = Math.sin(a) * this.speed;
+            this.vx = Math.cos(a) * this.getEffectiveSpeed();
+            this.vy = Math.sin(a) * this.getEffectiveSpeed();
           }
           this.enforceConstantSpeed();
         }
@@ -577,7 +594,7 @@
       updateSilverSkullSkill(dt) {
         if (this.charId !== 'silver_skull' || !this.alive || this.isParalyzed()) return;
         if (this.skillPhase === 'none') {
-          if (this.silverSkillReady && this.enemy.alive) {
+          if (this.silverSkillReady && this.enemy.alive && this.blockTimer <= 0 && this.silverSkillArmTimer <= 0) {
             const dist = Math.hypot(this.enemy.x - this.x, this.enemy.y - this.y);
             if (dist <= SILVER_THRUST_TRIGGER_RANGE) {
               this.skillPhase = 'prep';
@@ -643,6 +660,11 @@
         }
 
         if (this.blockTimer > 0) this.blockTimer -= dt;
+        if (this.blockBoostTimer > 0) this.blockBoostTimer -= dt;
+        if (this.silverSkillArmTimer > 0) {
+          this.silverSkillArmTimer -= dt;
+          if (this.silverSkillArmTimer <= 0) this.silverSkillReady = true;
+        }
 
         this.updateHammerSkill(dt);
         this.updateSilverSkullSkill(dt);
@@ -688,13 +710,17 @@
         if (inRange && !this.inCloseRange) {
           if (this.charId === 'orc') {
             this.readyPose = (edy > 20 && Math.abs(edx) < edy * 1.2) ? 'kick_ready' : 'weapon_ready';
-          } else {
+            this.readyTimer = READY_DISPLAY_TIME;
+          } else if (this.charId !== 'silver_skull' || this.silverSkillReady) {
             this.readyPose = 'weapon_ready';
+            this.readyTimer = READY_DISPLAY_TIME;
           }
-          this.readyTimer = READY_DISPLAY_TIME;
         }
         this.inCloseRange = inRange;
-        if (this.readyTimer > 0) return this.readyPose;
+        if (this.readyTimer > 0) {
+          if (this.charId === 'silver_skull' && !this.silverSkillReady) this.readyTimer = 0;
+          else return this.readyPose;
+        }
         return 'walk';
       }
 
@@ -967,7 +993,7 @@
           b.vx += (-v2n) * nx * 2;
           b.vy += (-v2n) * ny * 2;
         }
-        const bn = normalizeSpeed(b.vx, b.vy, b.speed);
+        const bn = normalizeSpeed(b.vx, b.vy, b.getEffectiveSpeed());
         b.vx = bn.vx; b.vy = bn.vy;
         b.applyAntiStuck();
         const dmg = applyDamage(a, b.getContactDamage(), b, { color: b.cfg.damageColor });
@@ -987,7 +1013,7 @@
           a.vx += (-v1n) * nx * 2;
           a.vy += (-v1n) * ny * 2;
         }
-        const an = normalizeSpeed(a.vx, a.vy, a.speed);
+        const an = normalizeSpeed(a.vx, a.vy, a.getEffectiveSpeed());
         a.vx = an.vx; a.vy = an.vy;
         a.applyAntiStuck();
         const dmg = applyDamage(b, a.getContactDamage(), a, { color: a.cfg.damageColor });
@@ -1014,8 +1040,8 @@
         b.vy += (v1n - v2n) * ny;
       }
 
-      const an = normalizeSpeed(a.vx, a.vy, a.speed);
-      const bn = normalizeSpeed(b.vx, b.vy, b.speed);
+      const an = normalizeSpeed(a.vx, a.vy, a.getEffectiveSpeed());
+      const bn = normalizeSpeed(b.vx, b.vy, b.getEffectiveSpeed());
       a.vx = an.vx; a.vy = an.vy;
       b.vx = bn.vx; b.vy = bn.vy;
       a.applyAntiStuck();
@@ -1080,22 +1106,52 @@
       else if (my > 410 && my < 480 && mx > 100 && mx < 440) startBattle();
     }
 
-    function fighterHpLine(f) {
-      let line = f.name + '  ' + Math.ceil(f.hp) + ' / ' + f.maxHp;
-      if (f.charId === 'silver_skull' && f.alive) {
-        line += f.silverSkillReady ? '  Skill READY' : '  Block ' + f.silverBlockCount + '/5';
+    function getSkillStatus(f) {
+      if (!f || !f.alive) return '—';
+      if (f.charId === 'orc') return '—';
+      if (f.charId === 'hammer') {
+        if (f.skillPhase === 'prep' || f.skillPhase === 'cast') return 'CAST';
+        if (f.skillCooldown <= 0) return 'READY';
+        return f.skillCooldown.toFixed(1) + 's';
       }
-      return line;
+      if (f.charId === 'silver_skull') {
+        if (f.isThrustingSkill()) return 'THRUST';
+        if (f.silverSkillReady) return 'READY';
+        if (f.silverSkillArmTimer > 0 && f.silverBlockCount >= SILVER_BLOCKS_REQUIRED_FOR_SKILL) return 'READY SOON';
+        return f.silverBlockCount + '/' + SILVER_BLOCKS_REQUIRED_FOR_SKILL;
+      }
+      return '—';
+    }
+
+    function drawFighterBottomRow(f, x, y, align) {
+      const hpText = f.name + '  ' + Math.ceil(f.hp) + ' / ' + f.maxHp;
+      const skillText = 'Skill: ' + getSkillStatus(f);
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = align;
+      ctx.fillStyle = '#1f2430';
+      ctx.fillText(hpText, x, y);
+      const hpW = ctx.measureText(hpText).width;
+      const skillW = ctx.measureText(skillText).width + 14;
+      const pillH = 18;
+      const gap = 10;
+      const pillX = align === 'left' ? x + hpW + gap : x - hpW - gap - skillW;
+      const pillY = y - 13;
+      const ready = getSkillStatus(f) === 'READY';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(pillX, pillY, skillW, pillH);
+      ctx.strokeStyle = ready ? f.cfg.damageColor : '#b0b6c0';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(pillX, pillY, skillW, pillH);
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = ready ? f.cfg.damageColor : '#3a4050';
+      ctx.textAlign = 'left';
+      ctx.fillText(skillText, pillX + 7, y - 1);
     }
 
     function drawBottomHPText(y) {
       if (!fighterA || !fighterB) return;
-      ctx.fillStyle = '#1f2430';
-      ctx.font = 'bold 13px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(fighterHpLine(fighterA), 24, y);
-      ctx.textAlign = 'right';
-      ctx.fillText(fighterHpLine(fighterB), GAME_WIDTH - 24, y);
+      drawFighterBottomRow(fighterA, 24, y, 'left');
+      drawFighterBottomRow(fighterB, GAME_WIDTH - 24, y, 'right');
     }
 
     function drawLabelWithDot(text, dotColor, cx, y) {
