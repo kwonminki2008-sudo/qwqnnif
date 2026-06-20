@@ -54,19 +54,23 @@
       'hammer_right_attack_down.png': HAMMER_VISUAL_SCALE * 0.94,
       'hammer_right_attack_diag_down.png': HAMMER_VISUAL_SCALE * 0.94,
       'orc_left_walk.png': 1.04,
-      'orc_left_attack_up.png': 1.12,
-      'orc_right_attack_up.png': 1.12,
+      'orc_left_attack_up.png': 1.32,
+      'orc_right_attack_up.png': 1.32,
       'orc_left_attack_diag_up.png': 1.10,
-      'orc_right_attack_diag_up.png': 1.10
+      'orc_right_attack_diag_up.png': 1.10,
+      'silver_skull_left_attack_up.png': 1.20,
+      'silver_skull_right_attack_up.png': 1.12
     };
 
-    const SPRITE_FEET_ANCHOR_UP = {
-      'hammer_left_attack_up.png': true,
-      'hammer_right_attack_up.png': true,
-      'orc_left_attack_up.png': true,
-      'orc_right_attack_up.png': true,
-      'orc_left_attack_diag_up.png': true,
-      'orc_right_attack_diag_up.png': true
+    const SPRITE_FEET_Y_EXTRA = {
+      'hammer_left_attack_up.png': 0.5,
+      'hammer_right_attack_up.png': 0.5,
+      'orc_left_attack_up.png': 0.75,
+      'orc_right_attack_up.png': 0.75,
+      'orc_left_attack_diag_up.png': 0.5,
+      'orc_right_attack_diag_up.png': 0.5,
+      'silver_skull_left_attack_up.png': 0.72,
+      'silver_skull_right_attack_up.png': 0.65
     };
 
     function getSpriteScaleMul(charId, filename) {
@@ -786,7 +790,7 @@
           const filename = this.getFilename();
           const sc = ensureCharScale(this.charId);
           const mul = getSpriteScaleMul(this.charId, filename);
-          const footAnchor = !!SPRITE_FEET_ANCHOR_UP[filename];
+          const yExtraFactor = SPRITE_FEET_Y_EXTRA[filename];
           const fbScale = BASE_RENDER_HEIGHT / safeSize(img.naturalHeight, 100);
           const scale = safeSize(sc && sc.scale, fbScale) * mul;
           let drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
@@ -799,7 +803,8 @@
             const baseDrawH = safeSize(info.drawH, drawH);
             drawW = safeSize(baseDrawW * mul, drawW);
             drawH = safeSize(baseDrawH * mul, drawH);
-            const footShift = footAnchor ? (drawH - baseDrawH) / 2 : 0;
+            const extraH = drawH - baseDrawH;
+            const footShift = yExtraFactor != null ? extraH * yExtraFactor : 0;
             drawX = center.x - safeSize(info.anchorOffX * mul, drawW / 2);
             drawY = center.y - safeSize(info.anchorOffY * mul, drawH * 0.52) - footShift;
             if (!isFinite(drawX)) drawX = center.x - drawW / 2;
