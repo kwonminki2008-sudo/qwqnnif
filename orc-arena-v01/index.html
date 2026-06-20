@@ -102,7 +102,7 @@
     const ELECTRIC_SPEED = 600;
     const ELECTRIC_SIZE = 48;
 
-    const SILVER_SKULL_SKILL_COOLDOWN = 5.0;
+    const SILVER_BLOCKS_REQUIRED_FOR_SKILL = 5;
     const SILVER_SKULL_SKILL_DURATION = 0.7;
     const SILVER_SKULL_SKILL_PREP = 0.25;
     const SILVER_SKULL_SKILL_ACTIVE = 0.18;
@@ -357,10 +357,9 @@
       if (!target.alive || target.damageCooldown > 0 || amount <= 0) return 0;
       let dmg = amount;
       let skipParalyze = !!options.skipParalyze;
-      if (target.charId === 'silver_skull' && !target.isInSkillState()) {
-        dmg = Math.ceil(amount * 0.25);
+      if (target.charId === 'silver_skull' && !target.isThrustingSkill()) {
+        dmg = Math.floor(amount * 0.25);
         target.triggerBlock(source);
-        target.skillCooldown = Math.max(0, target.skillCooldown - 0.5);
         skipParalyze = true;
       }
       if (target.isParalyzed()) dmg *= 2;
@@ -411,30 +410,37 @@
         this.paralyzeTimer = 0;
         this.savedVx = 0;
         this.savedVy = 0;
-        this.skillCooldown = charId === 'silver_skull' ? SILVER_SKULL_SKILL_COOLDOWN : HAMMER_SKILL_COOLDOWN;
+        this.skillCooldown = charId === 'hammer' ? HAMMER_SKILL_COOLDOWN : 0;
         this.skillPhase = 'none';
         this.skillPrepTimer = 0;
         this.skillTimer = 0;
         this.skillAttackPose = 'attack_forward';
-        this.thrustHitDone = false;
+        this.silverBlockCount = 0;
+        this.silverSkillReady = false;
         this.blockTimer = 0;
         this.blockSide = 'left';
         this.blockUp = false;
       }
 
       isInSkillState() {
-        if (this.charId === 'hammer' || this.charId === 'silver_skull') return this.skillPhase !== 'none';
+        if (this.charId === 'hammer') return this.skillPhase !== 'none';
         return false;
       }
 
+      isThrustingSkill() {
+        return this.charId === 'silver_skull' && this.skillPhase !== 'none';
+      }
+
       triggerBlock(source) {
-        if (this.charId !== 'silver_skull') return;
+        if (this.charId !== 'silver_skull' || this.isThrustingSkill()) return;
         const src = source || this.enemy;
         const dx = src.x - this.x;
         const dy = src.y - this.y;
         this.blockSide = dx < 0 ? 'left' : 'right';
         this.blockUp = dy < -10;
         this.blockTimer = SILVER_BLOCK_DURATION;
+        this.silverBlockCount = Math.min(this.silverBlockCount + 1, SILVER_BLOCKS_REQUIRED_FOR_SKILL);
+        if (this.silverBlockCount >= SILVER_BLOCKS_REQUIRED_FOR_SKILL) this.silverSkillReady = true;
       }
 
       isParalyzed() { return this.paralyzeTimer > 0; }
@@ -507,9 +513,8 @@
 
       applyParalyze(duration, source) {
         if (!this.alive) return;
-        if (this.charId === 'silver_skull' && !this.isInSkillState()) {
+        if (this.charId === 'silver_skull' && !this.isThrustingSkill()) {
           this.triggerBlock(source);
-          this.skillCooldown = Math.max(0, this.skillCooldown - 0.5);
           return;
         }
         if (this.paralyzeTimer <= 0) {
@@ -541,7 +546,7 @@
 
       onSkillComplete() {
         this.skillPhase = 'none';
-        this.skillCooldown = this.charId === 'silver_skull' ? SILVER_SKULL_SKILL_COOLDOWN : HAMMER_SKILL_COOLDOWN;
+        if (this.charId === 'hammer') this.skillCooldown = HAMMER_SKILL_COOLDOWN;
       }
 
       setAttackPoseFromDirection() {
@@ -571,11 +576,15 @@
       updateSilverSkullSkill(dt) {
         if (this.charId !== 'silver_skull' || !this.alive || this.isParalyzed()) return;
         if (this.skillPhase === 'none') {
-          this.skillCooldown -= dt;
-          if (this.skillCooldown <= 0 && this.enemy.alive) {
-            this.skillPhase = 'prep';
-            this.skillTimer = 0;
-            this.setFacingTowardEnemy();
+          if (this.silverSkillReady && this.enemy.alive) {
+            const dist = Math.hypot(this.enemy.x - this.x, this.enemy.y - this.y);
+            if (dist <= SILVER_THRUST_TRIGGER_RANGE) {
+              this.skillPhase = 'prep';
+              this.skillTimer = 0;
+              this.silverSkillReady = false;
+              this.silverBlockCount = 0;
+              this.setFacingTowardEnemy();
+            }
           }
           return;
         }
@@ -585,7 +594,6 @@
             this.skillPhase = 'active';
             this.setAttackPoseFromDirection();
             this.skillAttackPose = this.attackPose;
-            this.thrustHitDone = false;
             this.spawnThrustEffect();
           }
           return;
@@ -598,31 +606,8 @@
         }
         if (this.skillPhase === 'recovery' && this.skillTimer >= SILVER_SKULL_SKILL_DURATION) {
           this.skillPhase = 'none';
-          this.skillCooldown = SILVER_SKULL_SKILL_COOLDOWN;
           this.skillTimer = 0;
         }
-      }
-
-      checkThrustHit() {
-        const enemy = this.enemy;
-        if (!enemy.alive || this.thrustHitDone) return false;
-        this.thrustHitDone = true;
-        const dx = enemy.x - this.x;
-        const dy = enemy.y - this.y;
-        const ax = Math.abs(dx);
-        const ay = Math.abs(dy);
-        if (ax > 20) {
-          if (this.facing === 'right' && dx < 0) return false;
-          if (this.facing === 'left' && dx > 0) return false;
-        }
-        const pose = this.skillAttackPose;
-        let vTol = SILVER_SKULL_THRUST_WIDTH;
-        if (pose.includes('diag')) vTol *= 1.35;
-        else if (pose.includes('up') || pose.includes('down')) vTol *= 1.2;
-        if (ax > SILVER_SKULL_THRUST_RANGE || ay > vTol) return false;
-        const dmg = applyDamage(enemy, SILVER_SKULL_THRUST_DAMAGE, this, { color: this.cfg.damageColor });
-        if (dmg > 0) triggerHitScreenCamera();
-        return dmg > 0;
       }
 
       spawnThrustEffect() {
@@ -631,8 +616,7 @@
         const pose = this.skillAttackPose;
         if (pose === 'attack_up' || pose === 'attack_diag_up') tipY = -32;
         else if (pose === 'attack_down' || pose === 'attack_diag_down') tipY = 32;
-        thrustEffects.push(new ThrustEffect(this.x + tipX, this.y + tipY, this.facing, this));
-        this.checkThrustHit();
+        thrustEffects.push(new ThrustEffect(this.x + tipX, this.y + tipY, this.facing, this, this.enemy));
       }
 
       update(dt) {
@@ -714,7 +698,7 @@
       }
 
       setAttackPoseFromEnemy() {
-        if (this.isInSkillState()) return;
+        if (this.isInSkillState() || this.isThrustingSkill()) return;
         this.setAttackPoseFromDirection();
         this.attackTimer = ATTACK_DISPLAY_TIME;
       }
@@ -804,20 +788,40 @@
     }
 
     class ThrustEffect {
-      constructor(x, y, facing, owner) {
+      constructor(x, y, facing, owner, target) {
         this.x = x; this.y = y;
+        this.startX = x; this.startY = y;
         this.facing = facing;
         this.owner = owner;
+        this.target = target;
         this.life = SILVER_THRUST_EFFECT_LIFE;
         this.alive = true;
+        this.hasHit = false;
       }
       update(dt) {
         if (!this.alive) return;
-        if (!this.owner.alive) { this.alive = false; return; }
+        if (!this.owner.alive || !this.target.alive) { this.alive = false; return; }
         this.life -= dt;
-        if (this.life <= 0) this.alive = false;
-        const drift = 60 * dt;
-        this.x += this.facing === 'right' ? drift : -drift;
+        if (this.life <= 0) { this.alive = false; return; }
+        const ownerDist = Math.hypot(this.target.x - this.owner.x, this.target.y - this.owner.y);
+        const startDist = Math.hypot(this.target.x - this.startX, this.target.y - this.startY);
+        if (ownerDist > SILVER_THRUST_MAX_RANGE && startDist > SILVER_THRUST_MAX_RANGE) return;
+        if (this.hasHit) return;
+        const dx = this.target.x - this.x;
+        const dy = this.target.y - this.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= SILVER_THRUST_HIT_RADIUS) {
+          this.hasHit = true;
+          const dmg = applyDamage(this.target, SILVER_SKULL_THRUST_DAMAGE, this.owner, { color: this.owner.cfg.damageColor });
+          if (dmg > 0) triggerHitScreenCamera();
+          this.alive = false;
+          return;
+        }
+        if (dist > 1) {
+          const sp = SILVER_THRUST_EFFECT_SPEED * dt;
+          this.x += (dx / dist) * sp;
+          this.y += (dy / dist) * sp;
+        }
       }
       draw() {
         if (!this.alive) return;
@@ -1075,14 +1079,22 @@
       else if (my > 410 && my < 480 && mx > 100 && mx < 440) startBattle();
     }
 
+    function fighterHpLine(f) {
+      let line = f.name + '  ' + Math.ceil(f.hp) + ' / ' + f.maxHp;
+      if (f.charId === 'silver_skull' && f.alive) {
+        line += f.silverSkillReady ? '  Skill READY' : '  Block ' + f.silverBlockCount + '/5';
+      }
+      return line;
+    }
+
     function drawBottomHPText(y) {
       if (!fighterA || !fighterB) return;
       ctx.fillStyle = '#1f2430';
       ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(fighterA.name + '  ' + Math.ceil(fighterA.hp) + ' / ' + fighterA.maxHp, 24, y);
+      ctx.fillText(fighterHpLine(fighterA), 24, y);
       ctx.textAlign = 'right';
-      ctx.fillText(fighterB.name + '  ' + Math.ceil(fighterB.hp) + ' / ' + fighterB.maxHp, GAME_WIDTH - 24, y);
+      ctx.fillText(fighterHpLine(fighterB), GAME_WIDTH - 24, y);
     }
 
     function drawLabelWithDot(text, dotColor, cx, y) {
