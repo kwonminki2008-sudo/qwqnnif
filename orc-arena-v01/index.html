@@ -110,6 +110,8 @@
     const SILVER_THRUST_HIT_RADIUS = HITBOX_RADIUS + 20;
     const SILVER_BLOCK_DURATION = 0.4;
     const SILVER_THRUST_EFFECT_LIFE = 0.22;
+    const SILVER_POST_THRUST_VULNERABLE_TIME = 1.0;
+    const SILVER_GUARD_HP_COLOR = '#9ca3af';
 
     const CHARACTERS = {
       orc: {
@@ -362,7 +364,7 @@
       if (!target.alive || target.damageCooldown > 0 || amount <= 0) return 0;
       let dmg = amount;
       let skipParalyze = !!options.skipParalyze;
-      if (target.charId === 'silver_skull' && !target.isThrustingSkill()) {
+      if (target.charId === 'silver_skull' && !target.isSilverVulnerable()) {
         dmg = Math.floor(amount * 0.25);
         target.triggerBlock(source);
         skipParalyze = true;
@@ -379,6 +381,7 @@
         target.paralyzeTimer = 0;
         target.skillPhase = 'none';
         target.blockTimer = 0;
+        target.postThrustVulnerableTimer = 0;
         removeEffectsForOwner(target);
       }
       const color = options.color || (source && source.cfg && source.cfg.damageColor) || '#fff';
@@ -427,6 +430,16 @@
         this.savedBlockVy = 0;
         this.blockSide = 'left';
         this.blockUp = false;
+        this.postThrustVulnerableTimer = 0;
+      }
+
+      getMoveSpeed() {
+        if (this.charId === 'silver_skull' && this.postThrustVulnerableTimer > 0) return UNIT_SPEED * 0.9;
+        return this.speed;
+      }
+
+      isSilverVulnerable() {
+        return this.charId === 'silver_skull' && (this.isThrustingSkill() || this.postThrustVulnerableTimer > 0);
       }
 
       isInSkillState() {
@@ -443,7 +456,7 @@
       }
 
       triggerBlock(source) {
-        if (this.charId !== 'silver_skull' || this.isThrustingSkill()) return;
+        if (this.charId !== 'silver_skull' || this.isSilverVulnerable()) return;
         const src = source || this.enemy;
         const dx = src.x - this.x;
         const dy = src.y - this.y;
@@ -488,18 +501,18 @@
 
       giveInitialVelocity() {
         const angle = Math.random() * Math.PI * 2;
-        this.vx = Math.cos(angle) * this.speed;
-        this.vy = Math.sin(angle) * this.speed;
+        this.vx = Math.cos(angle) * this.getMoveSpeed();
+        this.vy = Math.sin(angle) * this.getMoveSpeed();
         this.facing = this.vx >= 0 ? 'right' : 'left';
       }
 
       enforceConstantSpeed() {
-        const n = normalizeSpeed(this.vx, this.vy, this.speed);
+        const n = normalizeSpeed(this.vx, this.vy, this.getMoveSpeed());
         this.vx = n.vx;
         this.vy = n.vy;
       }
 
-      minWallBounce() { return this.speed * 0.55; }
+      minWallBounce() { return this.getMoveSpeed() * 0.55; }
 
       resolveWallBounce() {
         const r = HITBOX_RADIUS;
@@ -532,8 +545,8 @@
           const s = Math.hypot(this.vx, this.vy);
           if (!isFinite(this.vx) || !isFinite(this.vy) || s < 1) {
             const a = Math.random() * Math.PI * 2;
-            this.vx = Math.cos(a) * this.speed;
-            this.vy = Math.sin(a) * this.speed;
+            this.vx = Math.cos(a) * this.getMoveSpeed();
+            this.vy = Math.sin(a) * this.getMoveSpeed();
           }
           this.enforceConstantSpeed();
         }
@@ -541,7 +554,7 @@
 
       applyParalyze(duration, source) {
         if (!this.alive) return;
-        if (this.charId === 'silver_skull' && !this.isThrustingSkill()) {
+        if (this.charId === 'silver_skull' && !this.isSilverVulnerable()) {
           this.triggerBlock(source);
           return;
         }
@@ -648,6 +661,9 @@
         if (this.skillPhase === 'recovery' && this.skillTimer >= SILVER_SKULL_SKILL_DURATION) {
           this.skillPhase = 'none';
           this.skillTimer = 0;
+          this.blockTimer = 0;
+          this.postThrustVulnerableTimer = SILVER_POST_THRUST_VULNERABLE_TIME;
+          this.enforceConstantSpeed();
         }
       }
 
@@ -692,6 +708,12 @@
           if (this.silverSkillArmTimer <= 0) this.silverSkillReady = true;
         }
 
+        if (this.postThrustVulnerableTimer > 0) {
+          const wasPost = this.postThrustVulnerableTimer;
+          this.postThrustVulnerableTimer = Math.max(0, this.postThrustVulnerableTimer - dt);
+          if (wasPost > 0 && this.postThrustVulnerableTimer <= 0) this.enforceConstantSpeed();
+        }
+
         this.updateHammerSkill(dt);
         this.updateSilverSkullSkill(dt);
 
@@ -724,8 +746,11 @@
           if (this.skillPhase === 'cast') return 'skill_cast';
         }
         if (this.charId === 'silver_skull') {
-          if (this.skillPhase === 'prep' || this.skillPhase === 'recovery') return 'weapon_ready';
-          if (this.skillPhase === 'active') return this.skillAttackPose;
+          if (this.isThrustingSkill()) {
+            if (this.skillPhase === 'prep' || this.skillPhase === 'recovery') return 'weapon_ready';
+            if (this.skillPhase === 'active') return this.skillAttackPose;
+          }
+          if (this.postThrustVulnerableTimer > 0) return 'idle';
           if (this.blockTimer > 0) {
             if (this.blockUp) return this.blockSide === 'left' ? 'skill_block_left_up' : 'skill_block_right_up';
             return this.blockSide === 'left' ? 'skill_block_left' : 'skill_block_right';
@@ -840,7 +865,9 @@
         const sx = VIEW_LEFT + hpX;
         const sy = VIEW_TOP + hpY;
         const pct = this.hp / this.maxHp;
-        const fill = this.isParalyzed() ? '#e6c200' : '#4caf50';
+        let fill = '#4caf50';
+        if (this.isParalyzed()) fill = '#e6c200';
+        else if (this.charId === 'silver_skull' && !this.isSilverVulnerable()) fill = SILVER_GUARD_HP_COLOR;
         ctx.fillStyle = '#000';
         ctx.fillRect(sx, sy, barW, barH);
         ctx.fillStyle = fill;
