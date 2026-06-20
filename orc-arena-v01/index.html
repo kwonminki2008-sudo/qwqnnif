@@ -104,8 +104,6 @@
 
     const SILVER_BLOCKS_REQUIRED_FOR_SKILL = 3;
     const SILVER_SKILL_READY_DELAY = 0.45;
-    const SILVER_BLOCK_SPEED_BOOST = 1.8;
-    const SILVER_BLOCK_BOOST_DURATION = 0.4;
     const SILVER_SKULL_SKILL_DURATION = 0.7;
     const SILVER_SKULL_SKILL_PREP = 0.25;
     const SILVER_SKULL_SKILL_ACTIVE = 0.18;
@@ -422,7 +420,8 @@
         this.silverSkillReady = false;
         this.silverSkillArmTimer = 0;
         this.blockTimer = 0;
-        this.blockBoostTimer = 0;
+        this.savedBlockVx = 0;
+        this.savedBlockVy = 0;
         this.blockSide = 'left';
         this.blockUp = false;
       }
@@ -436,6 +435,10 @@
         return this.charId === 'silver_skull' && this.skillPhase !== 'none';
       }
 
+      isBlocking() {
+        return this.charId === 'silver_skull' && this.blockTimer > 0;
+      }
+
       triggerBlock(source) {
         if (this.charId !== 'silver_skull' || this.isThrustingSkill()) return;
         const src = source || this.enemy;
@@ -443,22 +446,26 @@
         const dy = src.y - this.y;
         this.blockSide = dx < 0 ? 'left' : 'right';
         this.blockUp = dy < -10;
+        this.savedBlockVx = this.vx;
+        this.savedBlockVy = this.vy;
+        this.vx = 0;
+        this.vy = 0;
         this.blockTimer = SILVER_BLOCK_DURATION;
         this.silverBlockCount = Math.min(this.silverBlockCount + 1, SILVER_BLOCKS_REQUIRED_FOR_SKILL);
         if (this.silverBlockCount >= SILVER_BLOCKS_REQUIRED_FOR_SKILL) {
           this.silverSkillReady = false;
           this.silverSkillArmTimer = SILVER_SKILL_READY_DELAY;
         }
-        this.blockBoostTimer = SILVER_BLOCK_BOOST_DURATION;
-        if (Math.hypot(this.vx, this.vy) < 1) this.giveInitialVelocity();
-        this.enforceConstantSpeed();
       }
 
-      getEffectiveSpeed() {
-        if (this.charId === 'silver_skull' && this.blockBoostTimer > 0) {
-          return this.speed * SILVER_BLOCK_SPEED_BOOST;
+      restoreBlockVelocity() {
+        if (isFinite(this.savedBlockVx) && isFinite(this.savedBlockVy) && Math.hypot(this.savedBlockVx, this.savedBlockVy) > 1) {
+          this.vx = this.savedBlockVx;
+          this.vy = this.savedBlockVy;
+        } else {
+          this.giveInitialVelocity();
         }
-        return this.speed;
+        this.enforceConstantSpeed();
       }
 
       isParalyzed() { return this.paralyzeTimer > 0; }
@@ -484,12 +491,12 @@
       }
 
       enforceConstantSpeed() {
-        const n = normalizeSpeed(this.vx, this.vy, this.getEffectiveSpeed());
+        const n = normalizeSpeed(this.vx, this.vy, this.speed);
         this.vx = n.vx;
         this.vy = n.vy;
       }
 
-      minWallBounce() { return this.getEffectiveSpeed() * 0.55; }
+      minWallBounce() { return this.speed * 0.55; }
 
       resolveWallBounce() {
         const r = HITBOX_RADIUS;
@@ -522,8 +529,8 @@
           const s = Math.hypot(this.vx, this.vy);
           if (!isFinite(this.vx) || !isFinite(this.vy) || s < 1) {
             const a = Math.random() * Math.PI * 2;
-            this.vx = Math.cos(a) * this.getEffectiveSpeed();
-            this.vy = Math.sin(a) * this.getEffectiveSpeed();
+            this.vx = Math.cos(a) * this.speed;
+            this.vy = Math.sin(a) * this.speed;
           }
           this.enforceConstantSpeed();
         }
@@ -659,8 +666,11 @@
           }
         }
 
+        const wasBlocking = this.isBlocking();
         if (this.blockTimer > 0) this.blockTimer -= dt;
-        if (this.blockBoostTimer > 0) this.blockBoostTimer -= dt;
+        if (wasBlocking && this.blockTimer <= 0 && this.charId === 'silver_skull') {
+          this.restoreBlockVelocity();
+        }
         if (this.silverSkillArmTimer > 0) {
           this.silverSkillArmTimer -= dt;
           if (this.silverSkillArmTimer <= 0) this.silverSkillReady = true;
@@ -669,11 +679,16 @@
         this.updateHammerSkill(dt);
         this.updateSilverSkullSkill(dt);
 
-        if (!this.isParalyzed()) {
+        if (!this.isParalyzed() && !this.isBlocking()) {
           this.x += this.vx * dt;
           this.y += this.vy * dt;
           this.resolveWallBounce();
           this.applyAntiStuck();
+        } else if (this.isBlocking()) {
+          this.x = clampArena(this.x);
+          this.y = clampArena(this.y);
+          this.vx = 0;
+          this.vy = 0;
         }
 
         if (this.faceLockTime > 0) {
@@ -982,9 +997,11 @@
       const overlap = minDist - dist;
       const aPar = a.isParalyzed();
       const bPar = b.isParalyzed();
-      if (aPar && bPar) return;
+      const aImm = aPar || a.isBlocking();
+      const bImm = bPar || b.isBlocking();
+      if (aImm && bImm) return;
 
-      if (aPar && !bPar) {
+      if (aImm && !bImm) {
         b.x += nx * overlap;
         b.y += ny * overlap;
         const relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
@@ -993,9 +1010,10 @@
           b.vx += (-v2n) * nx * 2;
           b.vy += (-v2n) * ny * 2;
         }
-        const bn = normalizeSpeed(b.vx, b.vy, b.getEffectiveSpeed());
+        const bn = normalizeSpeed(b.vx, b.vy, b.speed);
         b.vx = bn.vx; b.vy = bn.vy;
         b.applyAntiStuck();
+        if (a.isBlocking()) { a.vx = 0; a.vy = 0; }
         const dmg = applyDamage(a, b.getContactDamage(), b, { color: b.cfg.damageColor });
         if (dmg > 0) {
           b.lockFacingOnHit();
@@ -1004,7 +1022,7 @@
         }
         return;
       }
-      if (!aPar && bPar) {
+      if (!aImm && bImm) {
         a.x -= nx * overlap;
         a.y -= ny * overlap;
         const relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
@@ -1013,9 +1031,10 @@
           a.vx += (-v1n) * nx * 2;
           a.vy += (-v1n) * ny * 2;
         }
-        const an = normalizeSpeed(a.vx, a.vy, a.getEffectiveSpeed());
+        const an = normalizeSpeed(a.vx, a.vy, a.speed);
         a.vx = an.vx; a.vy = an.vy;
         a.applyAntiStuck();
+        if (b.isBlocking()) { b.vx = 0; b.vy = 0; }
         const dmg = applyDamage(b, a.getContactDamage(), a, { color: a.cfg.damageColor });
         if (dmg > 0) {
           a.lockFacingOnHit();
@@ -1040,8 +1059,8 @@
         b.vy += (v1n - v2n) * ny;
       }
 
-      const an = normalizeSpeed(a.vx, a.vy, a.getEffectiveSpeed());
-      const bn = normalizeSpeed(b.vx, b.vy, b.getEffectiveSpeed());
+      const an = normalizeSpeed(a.vx, a.vy, a.speed);
+      const bn = normalizeSpeed(b.vx, b.vy, b.speed);
       a.vx = an.vx; a.vy = an.vy;
       b.vx = bn.vx; b.vy = bn.vy;
       a.applyAntiStuck();
