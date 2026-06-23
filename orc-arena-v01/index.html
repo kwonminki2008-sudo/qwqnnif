@@ -1,0 +1,1396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arena Battle Simulator</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #f1f2f5;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: 'Segoe UI', Arial, sans-serif;
+    }
+    #game-wrap { transform-origin: center center; }
+    canvas { display: block; background: #f4f5f8; }
+  </style>
+</head>
+<body>
+  <div id="game-wrap">
+    <canvas id="game" width="540" height="960"></canvas>
+  </div>
+
+  <script>
+    // ─── Tunable constants ──────────────────────────────────────────────────
+    const GAME_WIDTH  = 540;
+    const GAME_HEIGHT = 960;
+
+    const ARENA_VIEW_SIZE  = 500;
+    const VIEW_LEFT        = (GAME_WIDTH - ARENA_VIEW_SIZE) / 2;
+    const VIEW_TOP         = 108;
+    const ARENA_VISUAL_EXTRA_Y = 18;
+
+    const BASE_RENDER_HEIGHT   = 130;
+    const HITBOX_RADIUS        = 32;
+
+    const HAMMER_VISUAL_SCALE = 0.97;
+
+    const SPRITE_SCALE_OVERRIDES = {
+      'hammer_left_walk.png': HAMMER_VISUAL_SCALE * 0.94,
+      'hammer_right_walk.png': HAMMER_VISUAL_SCALE * 0.94,
+      'hammer_skill_ready.png': HAMMER_VISUAL_SCALE * 0.98,
+      'hammer_skill_cast.png': HAMMER_VISUAL_SCALE * 1.10,
+      'hammer_left_attack_up.png': HAMMER_VISUAL_SCALE * 1.08,
+      'hammer_right_attack_up.png': HAMMER_VISUAL_SCALE * 1.08,
+      'hammer_left_attack_down.png': HAMMER_VISUAL_SCALE * 0.93,
+      'hammer_left_attack_diag_down.png': HAMMER_VISUAL_SCALE * 0.93,
+      'hammer_right_attack_down.png': HAMMER_VISUAL_SCALE * 0.94,
+      'hammer_right_attack_diag_down.png': HAMMER_VISUAL_SCALE * 0.94,
+      'orc_left_walk.png': 1.04,
+      'orc_left_attack_up.png': 1.32,
+      'orc_right_attack_up.png': 1.32,
+      'orc_left_attack_diag_up.png': 1.10,
+      'orc_right_attack_diag_up.png': 1.10,
+      'silver_skull_left_attack_up.png': 1.20,
+      'silver_skull_right_attack_up.png': 1.12
+    };
+
+    const SPRITE_FEET_Y_EXTRA = {
+      'hammer_left_attack_up.png': 0.5,
+      'hammer_right_attack_up.png': 0.5,
+      'orc_left_attack_up.png': 0.75,
+      'orc_right_attack_up.png': 0.75,
+      'orc_left_attack_diag_up.png': 0.5,
+      'orc_right_attack_diag_up.png': 0.5,
+      'silver_skull_left_attack_up.png': 0.72,
+      'silver_skull_right_attack_up.png': 0.65
+    };
+
+    function getSpriteScaleMul(charId, filename) {
+      if (filename in SPRITE_SCALE_OVERRIDES) return SPRITE_SCALE_OVERRIDES[filename];
+      if (charId === 'hammer' && filename.startsWith('hammer_')) return HAMMER_VISUAL_SCALE;
+      return 1; // Blue Orc and all other frames: stable 1.0 base
+    }
+
+    const HP_BAR_OFFSET_Y  = HITBOX_RADIUS + 36;
+
+    const UNIT_SPEED          = 220;
+    const WALL_EPS            = 0.75;
+    const FACE_LOCK_TIME      = 0.5;
+    const DAMAGE_COOLDOWN     = 0.6;
+    const ATTACK_DISPLAY_TIME = 0.15;
+    const ORC_KICK_ATTACK_ANIM_TIME = 0.2;
+
+    const CLOSE_RANGE        = 95;
+    const READY_DISPLAY_TIME = 0.5;
+
+    const HAMMER_SKILL_COOLDOWN = 5.0;
+    const HAMMER_SKILL_PREPARE = 0.5;
+    const HAMMER_SKILL_DAMAGE = 5;
+    const PARALYZE_DURATION = 1.4;
+    const ELECTRIC_SPEED = 600;
+    const ELECTRIC_SIZE = 48;
+
+    const SILVER_BLOCKS_REQUIRED_FOR_SKILL = 3;
+    const SILVER_SKILL_READY_DELAY = 0.45;
+    const SILVER_SKULL_SKILL_DURATION = 0.7;
+    const SILVER_SKULL_SKILL_PREP = 0.25;
+    const SILVER_SKULL_SKILL_ACTIVE = 0.18;
+    const SILVER_SKULL_THRUST_DAMAGE = 27;
+    const SILVER_THRUST_TRIGGER_RANGE = 145;
+    const SILVER_THRUST_MAX_RANGE = 185;
+    const SILVER_THRUST_EFFECT_SPEED = 800;
+    const SILVER_THRUST_HIT_RADIUS = HITBOX_RADIUS + 20;
+    const SILVER_BLOCK_DURATION = 0.4;
+    const SILVER_THRUST_EFFECT_LIFE = 0.22;
+    const SILVER_POST_THRUST_VULNERABLE_TIME = 1.0;
+    const SILVER_GUARD_HP_COLOR = '#9ca3af';
+
+    const CHARACTERS = {
+      orc: {
+        id: 'orc', displayName: 'Blue Orc', path: 'assets/sprites/orc/',
+        maxHp: 100, damage: 10, kickDamage: 7, damageColor: '#63c7ff',
+        files: [
+          'orc_left_idle.png','orc_left_walk.png','orc_left_weapon_ready.png',
+          'orc_left_kick_ready.png','orc_left_attack_forward.png','orc_left_attack_up.png',
+          'orc_left_attack_diag_up.png','orc_left_kick_down.png','orc_left_kick_diag_down.png',
+          'orc_right_idle.png','orc_right_walk.png','orc_right_weapon_ready.png',
+          'orc_right_kick_ready.png','orc_right_attack_forward.png','orc_right_attack_up.png',
+          'orc_right_attack_diag_up.png','orc_right_kick_down.png','orc_right_kick_diag_down.png',
+          'orc_dead.png'
+        ],
+        poseFile(pose, facing) {
+          if (pose === 'dead') return 'orc_dead.png';
+          return 'orc_' + facing + '_' + pose + '.png';
+        }
+      },
+      hammer: {
+        id: 'hammer', displayName: 'Hammer Mage', path: 'assets/sprites/hammer/',
+        maxHp: 60, damage: 7, damageColor: '#ffd84a',
+        files: [
+          'hammer_left_idle.png','hammer_left_walk.png','hammer_left_weapon_ready.png',
+          'hammer_left_attack_forward.png','hammer_left_attack_up.png','hammer_left_attack_diag_up.png',
+          'hammer_left_attack_diag_down.png','hammer_left_attack_down.png',
+          'hammer_right_idle.png','hammer_right_walk.png','hammer_right_weapon_ready.png',
+          'hammer_right_attack_forward.png','hammer_right_attack_up.png','hammer_right_attack_diag_up.png',
+          'hammer_right_attack_diag_down.png','hammer_right_attack_down.png',
+          'hammer_dead.png','hammer_skill_ready.png','hammer_skill_cast.png','hammer_electric_effect.png'
+        ],
+        poseFile(pose, facing) {
+          if (pose === 'dead') return 'hammer_dead.png';
+          if (pose === 'skill_ready') return 'hammer_skill_ready.png';
+          if (pose === 'skill_cast') return 'hammer_skill_cast.png';
+          return 'hammer_' + facing + '_' + pose + '.png';
+        }
+      },
+      silver_skull: {
+        id: 'silver_skull', displayName: 'Silver Skull', path: 'assets/sprites/silver_skull/',
+        maxHp: 33, damage: 0, speed: UNIT_SPEED * 1.4, damageColor: '#b8d8ff',
+        files: [
+          'silver_skull_left_idle.png','silver_skull_left_walk.png','silver_skull_left_weapon_ready.png',
+          'silver_skull_left_attack_forward.png','silver_skull_left_attack_up.png','silver_skull_left_attack_diag_up.png',
+          'silver_skull_left_attack_diag_down.png','silver_skull_left_attack_down.png',
+          'silver_skull_right_idle.png','silver_skull_right_walk.png','silver_skull_right_weapon_ready.png',
+          'silver_skull_right_attack_forward.png','silver_skull_right_attack_up.png','silver_skull_right_attack_diag_up.png',
+          'silver_skull_right_attack_diag_down.png','silver_skull_right_attack_down.png',
+          'silver_skull_dead.png',
+          'silver_skull_skill_block_left.png','silver_skull_skill_block_left_up.png',
+          'silver_skull_skill_block_right.png','silver_skull_skill_block_right_up.png',
+          'silver_skull_left_thrust_effect.png','silver_skull_right_thrust_effect.png'
+        ],
+        poseFile(pose, facing) {
+          if (pose === 'dead') return 'silver_skull_dead.png';
+          if (pose === 'skill_block_left') return 'silver_skull_skill_block_left.png';
+          if (pose === 'skill_block_left_up') return 'silver_skull_skill_block_left_up.png';
+          if (pose === 'skill_block_right') return 'silver_skull_skill_block_right.png';
+          if (pose === 'skill_block_right_up') return 'silver_skull_skill_block_right_up.png';
+          return 'silver_skull_' + facing + '_' + pose + '.png';
+        }
+      }
+    };
+    const CHAR_IDS = ['orc', 'hammer', 'silver_skull'];
+
+    const MAX_SCREEN_PAN = 12;
+    const SCREEN_CAMERA_LERP = 0.06;
+    const screenCamera = { x: 0, y: 0, zoom: 1, shakeTime: 0, shakePower: 0, hitPulse: 0 };
+    // ──────────────────────────────────────────────────────────────────────
+
+    const gameWrap = document.getElementById('game-wrap');
+    const canvas = document.getElementById('game');
+    const ctx    = canvas.getContext('2d');
+
+    const images = {};
+    const spriteCropCache = {};
+    const scaleCache = {};
+
+    let gameState = 'select';
+    let p1Choice = 'orc';
+    let p2Choice = 'orc';
+    let fighterA = null;
+    let fighterB = null;
+    let electricEffects = [];
+    let thrustEffects = [];
+    let damagePopups = [];
+    let lastTime = 0;
+
+    function cropTransparent(img) {
+      const key = img.src;
+      if (spriteCropCache[key]) return spriteCropCache[key];
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      const fallback = { sx: 0, sy: 0, sw: w, sh: h, bodyCx: w / 2, bodyCy: h * 0.52, ok: false };
+      try {
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        const cctx = c.getContext('2d');
+        cctx.drawImage(img, 0, 0);
+        const data = cctx.getImageData(0, 0, w, h).data;
+        let minX = w, minY = h, maxX = 0, maxY = 0;
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            if (data[(y * w + x) * 4 + 3] > 10) {
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
+          }
+        }
+        if (maxX < minX) { spriteCropCache[key] = fallback; return fallback; }
+        const cw = maxX - minX + 1;
+        const ch = maxY - minY + 1;
+        if (cw < 1 || ch < 1) { spriteCropCache[key] = fallback; return fallback; }
+        const crop = { sx: minX, sy: minY, sw: cw, sh: ch, bodyCx: minX + cw / 2, bodyCy: minY + ch * 0.52, ok: true };
+        spriteCropCache[key] = crop;
+        return crop;
+      } catch (e) {
+        spriteCropCache[key] = fallback;
+        return fallback;
+      }
+    }
+
+    function safeSize(n, fallback) {
+      const fb = (typeof fallback === 'number' && isFinite(fallback) && fallback > 0) ? fallback : 1;
+      return (typeof n === 'number' && isFinite(n) && n > 0) ? n : fb;
+    }
+
+    function ensureCharScale(charId) {
+      if (scaleCache[charId]) return scaleCache[charId];
+      const cfg = CHARACTERS[charId];
+      const base = getImage(cfg.path + cfg.poseFile('walk', 'right')) ||
+                   getImage(cfg.path + cfg.poseFile('walk', 'left'));
+      if (!base) return null;
+      const crop = cropTransparent(base);
+      const scale = BASE_RENDER_HEIGHT / safeSize(crop.sh, base.naturalHeight);
+      scaleCache[charId] = {
+        scale,
+        anchorOffX: (crop.bodyCx - crop.sx) * scale,
+        anchorOffY: (crop.bodyCy - crop.sy) * scale
+      };
+      return scaleCache[charId];
+    }
+
+    function getSpriteDrawInfo(img, charId) {
+      const sc = ensureCharScale(charId);
+      const crop = cropTransparent(img);
+      const scale = safeSize(sc && sc.scale, BASE_RENDER_HEIGHT / safeSize(crop.sh, img.naturalHeight));
+      const drawW = safeSize(crop.sw * scale, img.naturalWidth * scale);
+      const drawH = safeSize(crop.sh * scale, BASE_RENDER_HEIGHT);
+      return {
+        crop, scale, drawW, drawH,
+        anchorOffX: safeSize(sc && sc.anchorOffX, drawW / 2),
+        anchorOffY: safeSize(sc && sc.anchorOffY, drawH * 0.52),
+        ok: crop.ok
+      };
+    }
+
+    function loadAllImages() {
+      for (const id of CHAR_IDS) {
+        const cfg = CHARACTERS[id];
+        for (const name of cfg.files) {
+          const key = cfg.path + name;
+          const img = new Image();
+          img.onerror = () => { img._failed = true; console.warn('Missing sprite:', key); };
+          img.src = key;
+          images[key] = img;
+        }
+      }
+    }
+
+    function getImage(src) {
+      const img = images[src];
+      if (img && !img._failed && img.complete && img.naturalWidth > 0) return img;
+      return null;
+    }
+
+    function pickDirectionalAttackPose(edx, edy, downPose, diagDownPose) {
+      const ax = Math.abs(edx);
+      const ay = Math.abs(edy);
+      if (edy > ay * 0.5 && edy > 10) return ax > ay * 0.6 ? diagDownPose : downPose;
+      if (edy < -ay * 0.5 && edy < -10) return ax > ay * 0.6 ? 'attack_diag_up' : 'attack_up';
+      return 'attack_forward';
+    }
+
+    function normalizeSpeed(vx, vy, target) {
+      const s = Math.hypot(vx, vy);
+      if (s < 1) {
+        const a = Math.random() * Math.PI * 2;
+        return { vx: Math.cos(a) * target, vy: Math.sin(a) * target };
+      }
+      const k = target / s;
+      return { vx: vx * k, vy: vy * k };
+    }
+
+    function spawnDamagePopup(target, value, color) {
+      if (value <= 0) return;
+      damagePopups.push({
+        x: target.x + (Math.random() - 0.5) * 16,
+        y: target.y - HITBOX_RADIUS,
+        value: Math.round(value),
+        color,
+        life: 0.7,
+        maxLife: 0.7
+      });
+    }
+
+    function updateDamagePopups(dt) {
+      for (const p of damagePopups) {
+        p.life -= dt;
+        p.y -= 40 * dt;
+      }
+      damagePopups = damagePopups.filter(p => p.life > 0);
+    }
+
+    function drawDamagePopups() {
+      for (const p of damagePopups) {
+        const alpha = Math.max(0, p.life / p.maxLife);
+        const sp = arenaToScreen(p.x, p.y);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold 18px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        ctx.lineWidth = 3;
+        ctx.strokeText(String(p.value), sp.x, sp.y);
+        ctx.fillStyle = p.color;
+        ctx.fillText(String(p.value), sp.x, sp.y);
+        ctx.restore();
+      }
+    }
+
+    function arenaToScreen(ax, ay) {
+      return { x: VIEW_LEFT + ax, y: VIEW_TOP + ay };
+    }
+
+    function clampArena(v) {
+      return Math.max(HITBOX_RADIUS, Math.min(ARENA_VIEW_SIZE - HITBOX_RADIUS, v));
+    }
+
+    function removeEffectsForOwner(owner) {
+      thrustEffects = thrustEffects.filter(e => e.owner !== owner);
+      electricEffects = electricEffects.filter(e => e.owner !== owner);
+    }
+
+    function applyDamage(target, amount, source, options) {
+      options = options || {};
+      if (!target.alive || target.damageCooldown > 0 || amount <= 0) return 0;
+      let dmg = amount;
+      let skipParalyze = !!options.skipParalyze;
+      if (target.charId === 'silver_skull' && !target.isSilverVulnerable()) {
+        dmg = Math.floor(amount * 0.25);
+        target.triggerBlock(source);
+        skipParalyze = true;
+      }
+      if (target.isParalyzed()) dmg *= 2;
+      if (dmg <= 0) return 0;
+      target.hp -= dmg;
+      target.damageCooldown = DAMAGE_COOLDOWN;
+      if (target.hp <= 0) {
+        target.hp = 0;
+        target.alive = false;
+        target.vx = 0;
+        target.vy = 0;
+        target.paralyzeTimer = 0;
+        target.skillPhase = 'none';
+        target.blockTimer = 0;
+        target.postThrustVulnerableTimer = 0;
+        removeEffectsForOwner(target);
+      }
+      const color = options.color || (source && source.cfg && source.cfg.damageColor) || '#fff';
+      spawnDamagePopup(target, dmg, color);
+      if (!skipParalyze && options.paralyzeDuration) target.applyParalyze(options.paralyzeDuration, source);
+      return dmg;
+    }
+
+    class Fighter {
+      constructor(x, y, charId, playerIndex, color, enemy) {
+        const cfg = CHARACTERS[charId];
+        this.x = x; this.y = y;
+        this.vx = 0; this.vy = 0;
+        this.charId = charId;
+        this.cfg = cfg;
+        this.name = cfg.displayName;
+        this.color = color;
+        this.playerIndex = playerIndex;
+        this.enemy = enemy;
+        this.maxHp = cfg.maxHp;
+        this.hp = cfg.maxHp;
+        this.damage = cfg.damage;
+        this.speed = cfg.speed || UNIT_SPEED;
+        this.alive = true;
+        this.facing = 'right';
+        this.damageCooldown = 0;
+        this.faceLockTime = 0;
+        this.attackTimer = 0;
+        this.attackPose = 'attack_forward';
+        this.readyTimer = 0;
+        this.readyPose = 'weapon_ready';
+        this.inCloseRange = false;
+        this.paralyzeTimer = 0;
+        this.savedVx = 0;
+        this.savedVy = 0;
+        this.skillCooldown = charId === 'hammer' ? HAMMER_SKILL_COOLDOWN : 0;
+        this.skillPhase = 'none';
+        this.skillPrepTimer = 0;
+        this.skillTimer = 0;
+        this.skillAttackPose = 'attack_forward';
+        this.silverBlockCount = 0;
+        this.silverSkillReady = false;
+        this.silverSkillArmTimer = 0;
+        this.blockTimer = 0;
+        this.savedBlockVx = 0;
+        this.savedBlockVy = 0;
+        this.blockSide = 'left';
+        this.blockUp = false;
+        this.postThrustVulnerableTimer = 0;
+      }
+
+      getMoveSpeed() {
+        if (this.charId === 'silver_skull' && this.postThrustVulnerableTimer > 0) return UNIT_SPEED * 0.9;
+        return this.speed;
+      }
+
+      isSilverVulnerable() {
+        return this.charId === 'silver_skull' && (this.isThrustingSkill() || this.postThrustVulnerableTimer > 0);
+      }
+
+      isInSkillState() {
+        if (this.charId === 'hammer') return this.skillPhase !== 'none';
+        return false;
+      }
+
+      isThrustingSkill() {
+        return this.charId === 'silver_skull' && this.skillPhase !== 'none';
+      }
+
+      isBlocking() {
+        return this.charId === 'silver_skull' && this.blockTimer > 0;
+      }
+
+      triggerBlock(source) {
+        if (this.charId !== 'silver_skull' || this.isSilverVulnerable()) return;
+        const src = source || this.enemy;
+        const dx = src.x - this.x;
+        const dy = src.y - this.y;
+        this.blockSide = dx < 0 ? 'left' : 'right';
+        this.blockUp = dy < -10;
+        this.savedBlockVx = this.vx;
+        this.savedBlockVy = this.vy;
+        this.vx = 0;
+        this.vy = 0;
+        this.blockTimer = SILVER_BLOCK_DURATION;
+        this.silverBlockCount = Math.min(this.silverBlockCount + 1, SILVER_BLOCKS_REQUIRED_FOR_SKILL);
+        if (this.silverBlockCount >= SILVER_BLOCKS_REQUIRED_FOR_SKILL) {
+          this.silverSkillReady = false;
+          this.silverSkillArmTimer = SILVER_SKILL_READY_DELAY;
+        }
+      }
+
+      restoreBlockVelocity() {
+        if (isFinite(this.savedBlockVx) && isFinite(this.savedBlockVy) && Math.hypot(this.savedBlockVx, this.savedBlockVy) > 1) {
+          this.vx = this.savedBlockVx;
+          this.vy = this.savedBlockVy;
+        } else {
+          this.giveInitialVelocity();
+        }
+        this.enforceConstantSpeed();
+      }
+
+      isParalyzed() { return this.paralyzeTimer > 0; }
+
+      getFilename() {
+        return this.cfg.poseFile(this.getPose(), this.facing);
+      }
+
+      getCurrentImage() {
+        return getImage(this.cfg.path + this.getFilename());
+      }
+
+      setFacingTowardEnemy() {
+        const dx = this.enemy.x - this.x;
+        if (Math.abs(dx) > 1) this.facing = dx >= 0 ? 'right' : 'left';
+      }
+
+      giveInitialVelocity() {
+        const angle = Math.random() * Math.PI * 2;
+        this.vx = Math.cos(angle) * this.getMoveSpeed();
+        this.vy = Math.sin(angle) * this.getMoveSpeed();
+        this.facing = this.vx >= 0 ? 'right' : 'left';
+      }
+
+      enforceConstantSpeed() {
+        const n = normalizeSpeed(this.vx, this.vy, this.getMoveSpeed());
+        this.vx = n.vx;
+        this.vy = n.vy;
+      }
+
+      minWallBounce() { return this.getMoveSpeed() * 0.55; }
+
+      resolveWallBounce() {
+        const r = HITBOX_RADIUS;
+        const maxX = ARENA_VIEW_SIZE - r;
+        const maxY = ARENA_VIEW_SIZE - r;
+        const mb = this.minWallBounce();
+        if (this.x <= r) {
+          this.x = r + WALL_EPS;
+          if (this.vx < 0) this.vx = Math.max(Math.abs(this.vx), mb);
+        }
+        if (this.x >= maxX) {
+          this.x = maxX - WALL_EPS;
+          if (this.vx > 0) this.vx = -Math.max(Math.abs(this.vx), mb);
+        }
+        if (this.y <= r) {
+          this.y = r + WALL_EPS;
+          if (this.vy < 0) this.vy = Math.max(Math.abs(this.vy), mb);
+        }
+        if (this.y >= maxY) {
+          this.y = maxY - WALL_EPS;
+          if (this.vy > 0) this.vy = -Math.max(Math.abs(this.vy), mb);
+        }
+        this.enforceConstantSpeed();
+      }
+
+      applyAntiStuck() {
+        this.x = clampArena(this.x);
+        this.y = clampArena(this.y);
+        if (!this.isParalyzed()) {
+          const s = Math.hypot(this.vx, this.vy);
+          if (!isFinite(this.vx) || !isFinite(this.vy) || s < 1) {
+            const a = Math.random() * Math.PI * 2;
+            this.vx = Math.cos(a) * this.getMoveSpeed();
+            this.vy = Math.sin(a) * this.getMoveSpeed();
+          }
+          this.enforceConstantSpeed();
+        }
+      }
+
+      applyParalyze(duration, source) {
+        if (!this.alive) return;
+        if (this.charId === 'silver_skull' && !this.isSilverVulnerable()) {
+          this.triggerBlock(source);
+          return;
+        }
+        if (this.charId === 'silver_skull') {
+          this.blockTimer = 0;
+          if (this.skillPhase !== 'none') {
+            this.skillPhase = 'none';
+            this.skillTimer = 0;
+            removeEffectsForOwner(this);
+          }
+        }
+        if (this.paralyzeTimer <= 0) {
+          this.savedVx = this.vx;
+          this.savedVy = this.vy;
+        }
+        this.paralyzeTimer = Math.max(this.paralyzeTimer, duration);
+        this.vx = 0;
+        this.vy = 0;
+      }
+
+      updateHammerSkill(dt) {
+        if (this.charId !== 'hammer' || !this.alive || this.isParalyzed()) return;
+        if (this.skillPhase === 'prep') {
+          this.skillPrepTimer -= dt;
+          if (this.skillPrepTimer <= 0) {
+            this.skillPhase = 'cast';
+            electricEffects.push(new ElectricEffect(this.x, this.y, this.enemy, this));
+          }
+          return;
+        }
+        if (this.skillPhase === 'cast') return;
+        this.skillCooldown -= dt;
+        if (this.skillCooldown <= 0 && this.enemy.alive) {
+          this.skillPhase = 'prep';
+          this.skillPrepTimer = HAMMER_SKILL_PREPARE;
+        }
+      }
+
+      onSkillComplete() {
+        this.skillPhase = 'none';
+        if (this.charId === 'hammer') this.skillCooldown = HAMMER_SKILL_COOLDOWN;
+      }
+
+      setAttackPoseFromDirection() {
+        const edx = this.enemy.x - this.x;
+        const edy = this.enemy.y - this.y;
+        if (this.charId === 'orc') {
+          this.attackPose = pickDirectionalAttackPose(edx, edy, 'kick_down', 'kick_diag_down');
+        } else {
+          this.attackPose = pickDirectionalAttackPose(edx, edy, 'attack_down', 'attack_diag_down');
+        }
+      }
+
+      updateSilverThrustAim() {
+        if (!this.enemy || !this.enemy.alive) return;
+        const dx = this.enemy.x - this.x;
+        const dy = this.enemy.y - this.y;
+        this.facing = dx < 0 ? 'left' : 'right';
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+        if (absDy < 18 || absDx > absDy * 1.6) {
+          this.skillAttackPose = 'attack_forward';
+        } else if (dy < 0 && absDx < absDy * 0.65) {
+          this.skillAttackPose = 'attack_up';
+        } else if (dy < 0) {
+          this.skillAttackPose = 'attack_diag_up';
+        } else if (dy > 0 && absDx < absDy * 0.65) {
+          this.skillAttackPose = 'attack_down';
+        } else {
+          this.skillAttackPose = 'attack_diag_down';
+        }
+      }
+
+      updateSilverSkullSkill(dt) {
+        if (this.charId !== 'silver_skull' || !this.alive || this.isParalyzed()) return;
+        if (this.skillPhase === 'none') {
+          if (this.silverSkillReady && this.enemy.alive && this.blockTimer <= 0 && this.silverSkillArmTimer <= 0) {
+            const dist = Math.hypot(this.enemy.x - this.x, this.enemy.y - this.y);
+            if (dist <= SILVER_THRUST_TRIGGER_RANGE) {
+              this.skillPhase = 'prep';
+              this.skillTimer = 0;
+              this.silverSkillReady = false;
+              this.silverBlockCount = 0;
+              this.setFacingTowardEnemy();
+            }
+          }
+          return;
+        }
+        this.skillTimer += dt;
+        if (this.skillPhase === 'prep') {
+          if (this.skillTimer >= SILVER_SKULL_SKILL_PREP) {
+            this.skillPhase = 'active';
+            this.updateSilverThrustAim();
+            this.spawnThrustEffect();
+          }
+          return;
+        }
+        if (this.skillPhase === 'active') {
+          if (this.skillTimer >= SILVER_SKULL_SKILL_PREP + SILVER_SKULL_SKILL_ACTIVE) {
+            this.skillPhase = 'recovery';
+          }
+          return;
+        }
+        if (this.skillPhase === 'recovery' && this.skillTimer >= SILVER_SKULL_SKILL_DURATION) {
+          this.skillPhase = 'none';
+          this.skillTimer = 0;
+          this.blockTimer = 0;
+          this.postThrustVulnerableTimer = SILVER_POST_THRUST_VULNERABLE_TIME;
+          this.enforceConstantSpeed();
+        }
+      }
+
+      spawnThrustEffect() {
+        const tipX = this.facing === 'left' ? -55 : 55;
+        let tipY = 0;
+        const pose = this.skillAttackPose;
+        if (pose === 'attack_up' || pose === 'attack_diag_up') tipY = -32;
+        else if (pose === 'attack_down' || pose === 'attack_diag_down') tipY = 32;
+        thrustEffects.push(new ThrustEffect(this.x + tipX, this.y + tipY, this.facing, this, this.enemy));
+      }
+
+      update(dt) {
+        if (!this.alive) return;
+        this.damageCooldown = Math.max(0, this.damageCooldown - dt);
+        this.faceLockTime = Math.max(0, this.faceLockTime - dt);
+        if (this.attackTimer > 0) this.attackTimer -= dt;
+        if (this.readyTimer > 0) this.readyTimer -= dt;
+
+        if (this.paralyzeTimer > 0) {
+          this.paralyzeTimer -= dt;
+          this.vx = 0;
+          this.vy = 0;
+          if (this.paralyzeTimer <= 0) {
+            if (isFinite(this.savedVx) && isFinite(this.savedVy) && Math.hypot(this.savedVx, this.savedVy) > 1) {
+              this.vx = this.savedVx;
+              this.vy = this.savedVy;
+            } else {
+              this.giveInitialVelocity();
+            }
+            this.enforceConstantSpeed();
+          }
+        }
+
+        const wasBlocking = this.isBlocking();
+        if (this.blockTimer > 0) this.blockTimer -= dt;
+        if (wasBlocking && this.blockTimer <= 0 && this.charId === 'silver_skull') {
+          this.restoreBlockVelocity();
+        }
+        if (this.silverSkillArmTimer > 0) {
+          this.silverSkillArmTimer -= dt;
+          if (this.silverSkillArmTimer <= 0) this.silverSkillReady = true;
+        }
+
+        if (this.postThrustVulnerableTimer > 0) {
+          const wasPost = this.postThrustVulnerableTimer;
+          this.postThrustVulnerableTimer = Math.max(0, this.postThrustVulnerableTimer - dt);
+          if (wasPost > 0 && this.postThrustVulnerableTimer <= 0) this.enforceConstantSpeed();
+        }
+
+        this.updateHammerSkill(dt);
+        this.updateSilverSkullSkill(dt);
+
+        if (!this.isParalyzed() && !this.isBlocking()) {
+          this.x += this.vx * dt;
+          this.y += this.vy * dt;
+          this.resolveWallBounce();
+          this.applyAntiStuck();
+        } else if (this.isBlocking()) {
+          this.x = clampArena(this.x);
+          this.y = clampArena(this.y);
+          this.vx = 0;
+          this.vy = 0;
+        }
+
+        if (this.faceLockTime > 0) {
+          this.setFacingTowardEnemy();
+        } else if (this.attackTimer <= 0 && !this.isParalyzed() && !this.isThrustingSkill() && Math.abs(this.vx) > 8) {
+          this.facing = this.vx > 0 ? 'right' : 'left';
+        }
+
+        if (this.isThrustingSkill()) this.updateSilverThrustAim();
+      }
+
+      getPose() {
+        if (!this.alive) return 'dead';
+        if (this.isParalyzed()) return 'idle';
+        if (this.charId === 'hammer') {
+          if (this.skillPhase === 'prep') return 'skill_ready';
+          if (this.skillPhase === 'cast') return 'skill_cast';
+        }
+        if (this.charId === 'silver_skull') {
+          if (this.isThrustingSkill()) {
+            if (this.skillPhase === 'prep' || this.skillPhase === 'recovery') return 'weapon_ready';
+            if (this.skillPhase === 'active') return this.skillAttackPose;
+          }
+          if (this.postThrustVulnerableTimer > 0) return 'idle';
+          if (this.blockTimer > 0) {
+            if (this.blockUp) return this.blockSide === 'left' ? 'skill_block_left_up' : 'skill_block_right_up';
+            return this.blockSide === 'left' ? 'skill_block_left' : 'skill_block_right';
+          }
+        }
+        if (this.attackTimer > 0) return this.attackPose;
+
+        const edx = this.enemy.x - this.x;
+        const edy = this.enemy.y - this.y;
+        const dist = Math.hypot(edx, edy);
+        const inRange = dist < CLOSE_RANGE && this.enemy.alive;
+
+        if (inRange && !this.inCloseRange) {
+          if (this.charId === 'orc') {
+            this.readyPose = (edy > 20 && Math.abs(edx) < edy * 1.2) ? 'kick_ready' : 'weapon_ready';
+            this.readyTimer = READY_DISPLAY_TIME;
+          } else if (this.charId !== 'silver_skull' || this.silverSkillReady) {
+            this.readyPose = 'weapon_ready';
+            this.readyTimer = READY_DISPLAY_TIME;
+          }
+        }
+        this.inCloseRange = inRange;
+        if (this.readyTimer > 0) {
+          if (this.charId === 'silver_skull' && !this.silverSkillReady) this.readyTimer = 0;
+          else return this.readyPose;
+        }
+        return 'walk';
+      }
+
+      setAttackPoseFromEnemy() {
+        if (this.isInSkillState() || this.isThrustingSkill()) return;
+        this.setAttackPoseFromDirection();
+        const isOrcKick = this.charId === 'orc' &&
+          (this.attackPose === 'kick_down' || this.attackPose === 'kick_diag_down');
+        this.attackTimer = isOrcKick ? ORC_KICK_ATTACK_ANIM_TIME : ATTACK_DISPLAY_TIME;
+      }
+
+      lockFacingOnHit() {
+        this.setFacingTowardEnemy();
+        this.faceLockTime = FACE_LOCK_TIME;
+      }
+
+      getContactDamage() {
+        if (this.charId === 'orc' && this.attackTimer > 0 &&
+            (this.attackPose === 'kick_down' || this.attackPose === 'kick_diag_down')) {
+          return this.cfg.kickDamage;
+        }
+        if (this.charId === 'orc') {
+          const edx = this.enemy.x - this.x;
+          const edy = this.enemy.y - this.y;
+          const ax = Math.abs(edx);
+          const ay = Math.abs(edy);
+          if (edy > ay * 0.5 && edy > 10) return this.cfg.kickDamage;
+        }
+        return this.damage;
+      }
+
+      drawSprite() {
+        const center = arenaToScreen(this.x, this.y);
+        const img = this.getCurrentImage();
+        if (img) {
+          const filename = this.getFilename();
+          const sc = ensureCharScale(this.charId);
+          const mul = getSpriteScaleMul(this.charId, filename);
+          const yExtraFactor = SPRITE_FEET_Y_EXTRA[filename];
+          const fbScale = BASE_RENDER_HEIGHT / safeSize(img.naturalHeight, 100);
+          const scale = safeSize(sc && sc.scale, fbScale) * mul;
+          let drawW = safeSize(img.naturalWidth * scale, BASE_RENDER_HEIGHT);
+          let drawH = safeSize(img.naturalHeight * scale, BASE_RENDER_HEIGHT);
+          let drawX = center.x - drawW / 2;
+          let drawY = center.y - drawH * 0.52;
+          try {
+            const info = getSpriteDrawInfo(img, this.charId);
+            const baseDrawW = safeSize(info.drawW, drawW);
+            const baseDrawH = safeSize(info.drawH, drawH);
+            drawW = safeSize(baseDrawW * mul, drawW);
+            drawH = safeSize(baseDrawH * mul, drawH);
+            const extraH = drawH - baseDrawH;
+            const footShift = yExtraFactor != null ? extraH * yExtraFactor : 0;
+            drawX = center.x - safeSize(info.anchorOffX * mul, drawW / 2);
+            drawY = center.y - safeSize(info.anchorOffY * mul, drawH * 0.52) - footShift;
+            if (!isFinite(drawX)) drawX = center.x - drawW / 2;
+            if (!isFinite(drawY)) drawY = center.y - drawH * 0.52;
+            if (!Number.isFinite(drawX) || !Number.isFinite(drawY) || drawW <= 0 || drawH <= 0) {
+              ctx.drawImage(img, center.x - drawW / 2, center.y - drawH * 0.52, drawW, drawH);
+            } else if (info.ok && info.crop.sw > 0 && info.crop.sh > 0) {
+              ctx.drawImage(img, info.crop.sx, info.crop.sy, info.crop.sw, info.crop.sh, drawX, drawY, drawW, drawH);
+            } else {
+              ctx.drawImage(img, drawX, drawY, drawW, drawH);
+            }
+          } catch (e) {
+            ctx.drawImage(img, center.x - drawW / 2, center.y - drawH * 0.52, drawW, drawH);
+          }
+        } else {
+          ctx.save();
+          ctx.fillStyle = this.alive ? this.color : '#555';
+          ctx.beginPath();
+          ctx.ellipse(center.x, center.y, HITBOX_RADIUS * 0.7, HITBOX_RADIUS, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      drawHeadHPBar() {
+        if (!this.alive) return;
+        const barW = 52;
+        const barH = 7;
+        let hpX = this.x - barW / 2;
+        let hpY = this.y - HP_BAR_OFFSET_Y;
+        hpX = Math.max(4, Math.min(hpX, ARENA_VIEW_SIZE - barW - 4));
+        hpY = Math.max(-ARENA_VISUAL_EXTRA_Y + 6, hpY);
+        const sx = VIEW_LEFT + hpX;
+        const sy = VIEW_TOP + hpY;
+        const pct = this.hp / this.maxHp;
+        let fill = '#4caf50';
+        if (this.isParalyzed()) fill = '#e6c200';
+        else if (this.charId === 'silver_skull' && !this.isSilverVulnerable()) fill = SILVER_GUARD_HP_COLOR;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(sx, sy, barW, barH);
+        ctx.fillStyle = fill;
+        ctx.fillRect(sx, sy, barW * pct, barH);
+      }
+    }
+
+    class ThrustEffect {
+      constructor(x, y, facing, owner, target) {
+        this.x = x; this.y = y;
+        this.startX = x; this.startY = y;
+        this.facing = facing;
+        this.owner = owner;
+        this.target = target;
+        this.life = SILVER_THRUST_EFFECT_LIFE;
+        this.alive = true;
+        this.hasHit = false;
+      }
+      update(dt) {
+        if (!this.alive) return;
+        if (!this.owner.alive || !this.target.alive) { this.alive = false; return; }
+        this.life -= dt;
+        if (this.life <= 0) { this.alive = false; return; }
+        const ownerDist = Math.hypot(this.target.x - this.owner.x, this.target.y - this.owner.y);
+        const startDist = Math.hypot(this.target.x - this.startX, this.target.y - this.startY);
+        if (ownerDist > SILVER_THRUST_MAX_RANGE && startDist > SILVER_THRUST_MAX_RANGE) return;
+        if (this.hasHit) return;
+        const dx = this.target.x - this.x;
+        const dy = this.target.y - this.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= SILVER_THRUST_HIT_RADIUS) {
+          this.hasHit = true;
+          const dmg = applyDamage(this.target, SILVER_SKULL_THRUST_DAMAGE, this.owner, { color: this.owner.cfg.damageColor });
+          if (dmg > 0) triggerHitScreenCamera();
+          this.alive = false;
+          return;
+        }
+        if (dist > 1) {
+          const sp = SILVER_THRUST_EFFECT_SPEED * dt;
+          this.x += (dx / dist) * sp;
+          this.y += (dy / dist) * sp;
+        }
+      }
+      draw() {
+        if (!this.alive) return;
+        const alpha = Math.max(0, this.life / SILVER_THRUST_EFFECT_LIFE);
+        const facing = (this.owner && this.owner.alive) ? this.owner.facing : this.facing;
+        const fname = 'silver_skull_' + facing + '_thrust_effect.png';
+        const img = getImage(CHARACTERS.silver_skull.path + fname);
+        const p = arenaToScreen(this.x, this.y);
+        const size = 64;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        if (img) ctx.drawImage(img, p.x - size / 2, p.y - size / 2, size, size);
+        ctx.restore();
+      }
+    }
+
+    class ElectricEffect {
+      constructor(x, y, target, owner) {
+        this.x = x; this.y = y;
+        this.target = target;
+        this.owner = owner;
+        this.alive = true;
+      }
+      update(dt) {
+        if (!this.alive) return;
+        if (!this.target.alive || !this.owner.alive) {
+          this.alive = false;
+          if (this.owner.skillPhase === 'cast') this.owner.onSkillComplete();
+          return;
+        }
+        const dx = this.target.x - this.x;
+        const dy = this.target.y - this.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < HITBOX_RADIUS) {
+          applyDamage(this.target, HAMMER_SKILL_DAMAGE, this.owner, {
+            paralyzeDuration: PARALYZE_DURATION,
+            color: CHARACTERS.hammer.damageColor
+          });
+          this.alive = false;
+          this.owner.onSkillComplete();
+          return;
+        }
+        this.x += (dx / dist) * ELECTRIC_SPEED * dt;
+        this.y += (dy / dist) * ELECTRIC_SPEED * dt;
+      }
+      draw() {
+        if (!this.alive) return;
+        const p = arenaToScreen(this.x, this.y);
+        const img = getImage(CHARACTERS.hammer.path + 'hammer_electric_effect.png');
+        if (img) ctx.drawImage(img, p.x - ELECTRIC_SIZE / 2, p.y - ELECTRIC_SIZE / 2, ELECTRIC_SIZE, ELECTRIC_SIZE);
+        else {
+          ctx.fillStyle = '#ffd84a';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, ELECTRIC_SIZE / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    function triggerHitScreenCamera() {
+      screenCamera.shakeTime = 0.12;
+      screenCamera.shakePower = 3;
+      screenCamera.hitPulse = 0.03;
+    }
+
+    function triggerDeathScreenCamera() {
+      screenCamera.shakeTime = 0.18;
+      screenCamera.shakePower = 4;
+      screenCamera.hitPulse = 0.04;
+    }
+
+    function updateScreenCamera(dt) {
+      const alive = [];
+      if (fighterA && fighterA.alive) alive.push(fighterA);
+      if (fighterB && fighterB.alive) alive.push(fighterB);
+      let targetPanX = 0, targetPanY = 0;
+      if (alive.length > 0) {
+        let midX = 0, midY = 0;
+        for (const u of alive) { midX += u.x; midY += u.y; }
+        midX /= alive.length;
+        midY /= alive.length;
+        const arenaMid = ARENA_VIEW_SIZE / 2;
+        targetPanX = (midX - arenaMid) * 0.12;
+        targetPanY = (midY - arenaMid) * 0.12;
+      }
+      targetPanX = Math.max(-MAX_SCREEN_PAN, Math.min(MAX_SCREEN_PAN, targetPanX));
+      targetPanY = Math.max(-MAX_SCREEN_PAN, Math.min(MAX_SCREEN_PAN, targetPanY));
+      screenCamera.x += (targetPanX - screenCamera.x) * SCREEN_CAMERA_LERP;
+      screenCamera.y += (targetPanY - screenCamera.y) * SCREEN_CAMERA_LERP;
+
+      let targetZoom = 1.0 + screenCamera.hitPulse;
+      if (alive.length === 2) {
+        const dist = Math.hypot(fighterB.x - fighterA.x, fighterB.y - fighterA.y);
+        if (dist < CLOSE_RANGE) targetZoom += (1 - dist / CLOSE_RANGE) * 0.025;
+      }
+      targetZoom = Math.min(1.04, targetZoom);
+      screenCamera.zoom += (targetZoom - screenCamera.zoom) * 0.08;
+      screenCamera.hitPulse = Math.max(0, screenCamera.hitPulse - dt * 0.35);
+      screenCamera.shakeTime = Math.max(0, screenCamera.shakeTime - dt);
+
+      let shakeX = 0, shakeY = 0;
+      if (screenCamera.shakeTime > 0) {
+        const fade = screenCamera.shakeTime / 0.18;
+        const p = screenCamera.shakePower * fade;
+        shakeX = (Math.random() - 0.5) * 2 * p;
+        shakeY = (Math.random() - 0.5) * 2 * p;
+      }
+      gameWrap.style.transform = 'translate(' + (screenCamera.x + shakeX) + 'px,' + (screenCamera.y + shakeY) + 'px) scale(' + screenCamera.zoom + ')';
+    }
+
+    function resetScreenCamera() {
+      screenCamera.x = 0;
+      screenCamera.y = 0;
+      screenCamera.zoom = 1;
+      screenCamera.shakeTime = 0;
+      screenCamera.shakePower = 0;
+      screenCamera.hitPulse = 0;
+      gameWrap.style.transform = '';
+    }
+
+    function resolveBodyCollision(a, b) {
+      if (!a.alive || !b.alive || a.hp <= 0 || b.hp <= 0) return;
+
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = HITBOX_RADIUS * 2;
+      if (dist >= minDist || dist === 0) return;
+
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const overlap = minDist - dist;
+      const aPar = a.isParalyzed();
+      const bPar = b.isParalyzed();
+      const aImm = aPar || a.isBlocking();
+      const bImm = bPar || b.isBlocking();
+      if (aImm && bImm) return;
+
+      if (aImm && !bImm) {
+        b.x += nx * overlap;
+        b.y += ny * overlap;
+        const relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+        if (relVn < 0) {
+          const v2n = b.vx * nx + b.vy * ny;
+          b.vx += (-v2n) * nx * 2;
+          b.vy += (-v2n) * ny * 2;
+        }
+        const bn = normalizeSpeed(b.vx, b.vy, b.speed);
+        b.vx = bn.vx; b.vy = bn.vy;
+        b.applyAntiStuck();
+        if (a.isBlocking()) { a.vx = 0; a.vy = 0; }
+        const dmg = applyDamage(a, b.getContactDamage(), b, { color: b.cfg.damageColor });
+        if (dmg > 0) {
+          b.lockFacingOnHit();
+          if (!b.isInSkillState()) b.setAttackPoseFromEnemy();
+          triggerHitScreenCamera();
+        }
+        return;
+      }
+      if (!aImm && bImm) {
+        a.x -= nx * overlap;
+        a.y -= ny * overlap;
+        const relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+        if (relVn < 0) {
+          const v1n = a.vx * nx + a.vy * ny;
+          a.vx += (-v1n) * nx * 2;
+          a.vy += (-v1n) * ny * 2;
+        }
+        const an = normalizeSpeed(a.vx, a.vy, a.speed);
+        a.vx = an.vx; a.vy = an.vy;
+        a.applyAntiStuck();
+        if (b.isBlocking()) { b.vx = 0; b.vy = 0; }
+        const dmg = applyDamage(b, a.getContactDamage(), a, { color: a.cfg.damageColor });
+        if (dmg > 0) {
+          a.lockFacingOnHit();
+          if (!a.isInSkillState()) a.setAttackPoseFromEnemy();
+          triggerHitScreenCamera();
+        }
+        return;
+      }
+
+      a.x -= nx * overlap * 0.5;
+      a.y -= ny * overlap * 0.5;
+      b.x += nx * overlap * 0.5;
+      b.y += ny * overlap * 0.5;
+
+      const relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+      if (relVn < 0) {
+        const v1n = a.vx * nx + a.vy * ny;
+        const v2n = b.vx * nx + b.vy * ny;
+        a.vx += (v2n - v1n) * nx;
+        a.vy += (v2n - v1n) * ny;
+        b.vx += (v1n - v2n) * nx;
+        b.vy += (v1n - v2n) * ny;
+      }
+
+      const an = normalizeSpeed(a.vx, a.vy, a.speed);
+      const bn = normalizeSpeed(b.vx, b.vy, b.speed);
+      a.vx = an.vx; a.vy = an.vy;
+      b.vx = bn.vx; b.vy = bn.vy;
+      a.applyAntiStuck();
+      b.applyAntiStuck();
+
+      const aAliveBefore = a.alive;
+      const bAliveBefore = b.alive;
+      const aDmg = applyDamage(a, b.getContactDamage(), b, { color: b.cfg.damageColor });
+      const bDmg = applyDamage(b, a.getContactDamage(), a, { color: a.cfg.damageColor });
+      if (aDmg > 0 || bDmg > 0) {
+        a.lockFacingOnHit();
+        b.lockFacingOnHit();
+        if (!a.isInSkillState()) a.setAttackPoseFromEnemy();
+        if (!b.isInSkillState()) b.setAttackPoseFromEnemy();
+        triggerHitScreenCamera();
+      }
+      if ((aAliveBefore && !a.alive) || (bAliveBefore && !b.alive)) triggerDeathScreenCamera();
+    }
+
+    function cycleChar(choice, dir) {
+      const i = CHAR_IDS.indexOf(choice);
+      return CHAR_IDS[(i + dir + CHAR_IDS.length) % CHAR_IDS.length];
+    }
+
+    function drawSelectScreen() {
+      ctx.fillStyle = '#f4f5f8';
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+      ctx.fillStyle = '#1f2430';
+      ctx.font = 'bold 32px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('ARENA BATTLE SIMULATOR', GAME_WIDTH / 2, 70);
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillStyle = '#555e70';
+      ctx.fillText('CHARACTER SELECT', GAME_WIDTH / 2, 105);
+      ctx.fillStyle = CHARACTERS[p1Choice].damageColor;
+      ctx.fillText('P1: ' + CHARACTERS[p1Choice].displayName, GAME_WIDTH / 2, 200);
+      ctx.fillStyle = CHARACTERS[p2Choice].damageColor;
+      ctx.fillText('P2: ' + CHARACTERS[p2Choice].displayName, GAME_WIDTH / 2, 250);
+      ctx.fillStyle = '#e8ebf0';
+      ctx.fillRect(120, 420, 300, 48);
+      ctx.strokeStyle = '#5f6775';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(120, 420, 300, 48);
+      ctx.fillStyle = '#1f2430';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillText('START BATTLE', GAME_WIDTH / 2, 450);
+      ctx.fillStyle = '#555e70';
+      ctx.font = '13px sans-serif';
+      const hints = [
+        'P1: A/D or tap left side',
+        'P2: J/L or tap right side',
+        'Enter / Space / tap START',
+        'Esc in battle: back here'
+      ];
+      hints.forEach((t, i) => ctx.fillText(t, GAME_WIDTH / 2, 520 + i * 22));
+      resetScreenCamera();
+    }
+
+    function handleSelectClick(mx, my) {
+      if (my > 180 && my < 230) p1Choice = cycleChar(p1Choice, mx < GAME_WIDTH / 2 ? -1 : 1);
+      else if (my > 230 && my < 280) p2Choice = cycleChar(p2Choice, mx < GAME_WIDTH / 2 ? -1 : 1);
+      else if (my > 410 && my < 480 && mx > 100 && mx < 440) startBattle();
+    }
+
+    function getSkillStatus(f) {
+      if (!f || !f.alive) return '—';
+      if (f.charId === 'orc') return '—';
+      if (f.charId === 'hammer') {
+        if (f.skillPhase === 'prep' || f.skillPhase === 'cast') return 'CAST';
+        if (f.skillCooldown <= 0) return 'READY';
+        return f.skillCooldown.toFixed(1) + 's';
+      }
+      if (f.charId === 'silver_skull') {
+        if (f.isThrustingSkill()) return 'THRUST';
+        if (f.silverSkillReady) return 'READY';
+        if (f.silverSkillArmTimer > 0 && f.silverBlockCount >= SILVER_BLOCKS_REQUIRED_FOR_SKILL) return 'READY SOON';
+        return f.silverBlockCount + '/' + SILVER_BLOCKS_REQUIRED_FOR_SKILL;
+      }
+      return '—';
+    }
+
+    function drawFighterBottomRow(f, x, y, align) {
+      const hpText = f.name + '  ' + Math.ceil(f.hp) + ' / ' + f.maxHp;
+      const skillStatus = getSkillStatus(f);
+      const skillText = 'Skill: ' + skillStatus;
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = align;
+      ctx.fillStyle = '#1f2430';
+      ctx.fillText(hpText, x, y);
+      const hpW = ctx.measureText(hpText).width;
+      const skillW = ctx.measureText(skillText).width + 14;
+      const pillH = 18;
+      const gap = 10;
+      const pillX = align === 'left' ? x + hpW + gap : x - hpW - gap - skillW;
+      const pillY = y - 13;
+      const ready = skillStatus === 'READY';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(pillX, pillY, skillW, pillH);
+      ctx.strokeStyle = ready ? f.cfg.damageColor : '#b0b6c0';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(pillX, pillY, skillW, pillH);
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = ready ? f.cfg.damageColor : '#3a4050';
+      ctx.textAlign = 'left';
+      ctx.fillText(skillText, pillX + 7, y - 1);
+    }
+
+    function drawBottomHPText(y) {
+      if (!fighterA || !fighterB) return;
+      drawFighterBottomRow(fighterA, 24, y, 'left');
+      drawFighterBottomRow(fighterB, GAME_WIDTH - 24, y, 'right');
+    }
+
+    function drawLabelWithDot(text, dotColor, cx, y) {
+      ctx.font = 'bold 13px sans-serif';
+      const dotR = 3.5;
+      const gap = 6;
+      const tw = ctx.measureText(text).width;
+      const x0 = cx - (dotR * 2 + gap + tw) / 2;
+      ctx.fillStyle = dotColor;
+      ctx.beginPath();
+      ctx.arc(x0 + dotR, y - 3, dotR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#2b303a';
+      ctx.fillText(text, x0 + dotR * 2 + gap, y);
+    }
+
+    function drawFixedUI() {
+      ctx.fillStyle = '#f4f5f8';
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.12)';
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetY = 2;
+      ctx.fillStyle = '#1f2430';
+      ctx.font = 'bold 30px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('ARENA BATTLE SIMULATOR', GAME_WIDTH / 2, 46);
+      ctx.restore();
+
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'center';
+      drawLabelWithDot(fighterA.name.toUpperCase(), fighterA.cfg.damageColor, GAME_WIDTH / 2 - 90, 82);
+      ctx.fillStyle = '#555e70';
+      ctx.fillText('VS', GAME_WIDTH / 2, 82);
+      drawLabelWithDot(fighterB.name.toUpperCase(), fighterB.cfg.damageColor, GAME_WIDTH / 2 + 90, 82);
+
+      ctx.fillStyle = '#555e70';
+      ctx.font = '11px sans-serif';
+      ctx.fillText('R: Restart   Esc: Select', GAME_WIDTH / 2, GAME_HEIGHT - 12);
+    }
+
+    function drawArenaWorld() {
+      const visTop = VIEW_TOP - ARENA_VISUAL_EXTRA_Y;
+      const visH = ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y * 2;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
+      ctx.clip();
+
+      ctx.fillStyle = '#e7e9ee';
+      ctx.fillRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
+
+      const tile = 60;
+      ctx.strokeStyle = '#c6cbd3';
+      ctx.lineWidth = 1;
+      for (let x = 0; x <= ARENA_VIEW_SIZE; x += tile) {
+        const sx = VIEW_LEFT + x;
+        ctx.beginPath();
+        ctx.moveTo(sx, visTop);
+        ctx.lineTo(sx, visTop + visH);
+        ctx.stroke();
+      }
+      for (let y = -ARENA_VISUAL_EXTRA_Y; y <= ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y; y += tile) {
+        const sy = VIEW_TOP + y;
+        ctx.beginPath();
+        ctx.moveTo(VIEW_LEFT, sy);
+        ctx.lineTo(VIEW_LEFT + ARENA_VIEW_SIZE, sy);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+
+      const units = [fighterA, fighterB];
+      for (const u of units) { if (u && !u.alive) u.drawSprite(); }
+      for (const u of units) { if (u && u.alive) u.drawSprite(); }
+      for (const e of thrustEffects) e.draw();
+      for (const e of electricEffects) e.draw();
+      for (const u of units) { if (u && u.alive) u.drawHeadHPBar(); }
+      drawDamagePopups();
+
+      ctx.strokeStyle = '#5f6775';
+      ctx.lineWidth = 5;
+      ctx.strokeRect(VIEW_LEFT, visTop, ARENA_VIEW_SIZE, visH);
+      ctx.lineWidth = 2;
+      ctx.strokeRect(VIEW_LEFT + 3, visTop + 3, ARENA_VIEW_SIZE - 6, visH - 6);
+
+      const visBottom = VIEW_TOP + ARENA_VIEW_SIZE + ARENA_VISUAL_EXTRA_Y;
+      ctx.fillStyle = '#f4f5f8';
+      ctx.fillRect(0, visBottom, GAME_WIDTH, GAME_HEIGHT - visBottom);
+
+      drawBottomHPText(VIEW_TOP + ARENA_VIEW_SIZE + 36);
+    }
+
+    function startBattle() {
+      const mid = ARENA_VIEW_SIZE / 2;
+      fighterA = new Fighter(mid - 100, mid, p1Choice, 0, CHARACTERS[p1Choice].damageColor, null);
+      fighterB = new Fighter(mid + 100, mid, p2Choice, 1, CHARACTERS[p2Choice].damageColor, null);
+      fighterA.enemy = fighterB;
+      fighterB.enemy = fighterA;
+      fighterA.giveInitialVelocity();
+      fighterB.giveInitialVelocity();
+      electricEffects = [];
+      thrustEffects = [];
+      damagePopups = [];
+      resetScreenCamera();
+      gameState = 'battle';
+    }
+
+    function restartBattle() {
+      if (gameState === 'battle') startBattle();
+    }
+
+    function gameLoop(timestamp) {
+      const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+      lastTime = timestamp;
+
+      if (gameState === 'select') {
+        drawSelectScreen();
+      } else {
+        fighterA.update(dt);
+        fighterB.update(dt);
+        resolveBodyCollision(fighterA, fighterB);
+        electricEffects = electricEffects.filter(e => e.alive);
+        thrustEffects = thrustEffects.filter(e => e.alive);
+        for (const e of electricEffects) e.update(dt);
+        for (const e of thrustEffects) e.update(dt);
+        updateDamagePopups(dt);
+        updateScreenCamera(dt);
+
+        drawFixedUI();
+        drawArenaWorld();
+      }
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    function canvasCoords(e) {
+      const r = canvas.getBoundingClientRect();
+      const sx = GAME_WIDTH / r.width;
+      const sy = GAME_HEIGHT / r.height;
+      return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
+    }
+
+    canvas.addEventListener('click', (e) => {
+      if (gameState !== 'select') return;
+      const p = canvasCoords(e);
+      handleSelectClick(p.x, p.y);
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (gameState === 'select') {
+        if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') p1Choice = cycleChar(p1Choice, -1);
+        if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') p1Choice = cycleChar(p1Choice, 1);
+        if (e.key === 'j' || e.key === 'J') p2Choice = cycleChar(p2Choice, -1);
+        if (e.key === 'l' || e.key === 'L') p2Choice = cycleChar(p2Choice, 1);
+        if (e.key === '1') p1Choice = 'orc';
+        if (e.key === '2') p1Choice = 'hammer';
+        if (e.key === '3') p1Choice = 'silver_skull';
+        if (e.key === 'q' || e.key === 'Q') p2Choice = 'orc';
+        if (e.key === 'w' || e.key === 'W') p2Choice = 'hammer';
+        if (e.key === 'e' || e.key === 'E') p2Choice = 'silver_skull';
+        if (e.key === 'Enter' || e.key === ' ') startBattle();
+      } else {
+        if (e.key === 'Escape') { thrustEffects = []; electricEffects = []; gameState = 'select'; }
+        if (e.key === 'r' || e.key === 'R') restartBattle();
+      }
+    });
+
+    loadAllImages();
+    requestAnimationFrame((t) => { lastTime = t; gameLoop(t); });
+  </script>
+</body>
+</html>
