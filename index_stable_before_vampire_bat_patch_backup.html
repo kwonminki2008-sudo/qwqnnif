@@ -222,19 +222,12 @@
       lancerThrustDamage: 9,
       lancerThrustKnockback: 280,
       lancerThrustRange: 204,
-      vampireInterval: 7000,
+      vampireInterval: 5500,
       vampireDashDuration: 220,
       vampireDashSpeed: 2100,
       vampireDashDamage: 14,
       vampireDashHealRatio: 0.5,
-      vampireKnockback: 320,
-      vampireBatSwarmInterval: 10000,
-      vampireBatSwarmDamage: 6,
-      vampireBatSwarmHealMax: 3,
-      vampireBatSwarmSpeed: 960,
-      vampireBatSwarmHitRadius: 30,
-      vampireBatSwarmLife: 3200,
-      vampireTeleportSafetyMs: 150
+      vampireKnockback: 320
     };
 
     // ===== EDIT CHARACTERS HERE ONLY =====
@@ -432,8 +425,7 @@
         hp: 44,
         baseDamage: 6,
         abilityName: "BLOOD DASH",
-        abilityCooldown: 7000,
-        secondaryAbilityCooldown: 10000,
+        abilityCooldown: 5500,
         abilityType: "vampire",
         ballColor: "#5b1230",
         weaponType: "claw",
@@ -467,8 +459,6 @@
     let slashEffects = [];
     let ninjaAfterimages = [];
     let vampireAfterimages = [];
-    let batSwarms = [];
-    let vampireTeleportSmokes = [];
     let bomberBurstEffects = [];
     let bombExplosionEffects = [];
     let gameOver = false;
@@ -1267,231 +1257,6 @@
       enforceSpeedLimits(opponent);
       slashEffects.push({ x: opponent.x, y: opponent.y, life: 260, alpha: 1, blood: true });
       spawnImpactFlash(opponent.x, opponent.y, 34, "#c0392b");
-    }
-
-    function applyBatSwarmHeal(vampire, actualDamage) {
-      const heal = Math.min(ABILITY.vampireBatSwarmHealMax, actualDamage);
-      if (heal <= 0) return;
-      const before = vampire.hp;
-      vampire.hp = Math.min(vampire.maxHp, vampire.hp + heal);
-      const actualHeal = vampire.hp - before;
-      if (actualHeal > 0) spawnHealNumber(vampire, actualHeal);
-    }
-
-    function clampBallToArena(ball, x, y) {
-      return {
-        x: clamp(x, ARENA.x + ball.radius, ARENA.x + ARENA.w - ball.radius),
-        y: clamp(y, ARENA.y + ball.radius, ARENA.y + ARENA.h - ball.radius)
-      };
-    }
-
-    function resolveVampireTeleportPosition(vampire, targetX, targetY) {
-      const opponent = balls.find((b) => b !== vampire);
-      let tx = targetX;
-      let ty = targetY;
-      const clamped = clampBallToArena(vampire, tx, ty);
-      tx = clamped.x;
-      ty = clamped.y;
-      if (opponent && opponent.hp > 0) {
-        const minDist = vampire.radius + opponent.radius + PHYSICS.separationPadding;
-        const dx = tx - opponent.x;
-        const dy = ty - opponent.y;
-        const dist = Math.hypot(dx, dy) || 1;
-        if (dist < minDist) {
-          tx = opponent.x + (dx / dist) * minDist;
-          ty = opponent.y + (dy / dist) * minDist;
-          const reclamped = clampBallToArena(vampire, tx, ty);
-          tx = reclamped.x;
-          ty = reclamped.y;
-        }
-      }
-      return { x: tx, y: ty };
-    }
-
-    function spawnVampireTeleportSmoke(x, y) {
-      for (let i = 0; i < 6; i++) {
-        vampireTeleportSmokes.push({
-          x: x + rand(-14, 14),
-          y: y + rand(-14, 14),
-          vx: rand(-60, 60),
-          vy: rand(-80, -20),
-          size: rand(10, 18),
-          life: rand(220, 360),
-          alpha: 1
-        });
-      }
-    }
-
-    function teleportVampireFromBatSwarm(vampire, targetX, targetY) {
-      const oldX = vampire.x;
-      const oldY = vampire.y;
-      const pos = resolveVampireTeleportPosition(vampire, targetX, targetY);
-      spawnVampireTeleportSmoke(oldX, oldY);
-      vampire.x = pos.x;
-      vampire.y = pos.y;
-      spawnVampireTeleportSmoke(vampire.x, vampire.y);
-      vampire.teleportCollisionSafety = ABILITY.vampireTeleportSafetyMs;
-    }
-
-    function spawnBatSwarm(vampire, opponent) {
-      const dx = opponent.x - vampire.x;
-      const dy = opponent.y - vampire.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      const speed = ABILITY.vampireBatSwarmSpeed;
-      batSwarms.push({
-        fromBall: vampire,
-        x: vampire.x,
-        y: vampire.y,
-        vx: (dx / dist) * speed,
-        vy: (dy / dist) * speed,
-        lastValidX: vampire.x,
-        lastValidY: vampire.y,
-        active: true,
-        hit: false,
-        life: ABILITY.vampireBatSwarmLife,
-        trail: [],
-        phase: Math.random() * Math.PI * 2
-      });
-    }
-
-    function isBatSwarmInsideArena(x, y, pad) {
-      return (
-        x >= ARENA.x + pad &&
-        x <= ARENA.x + ARENA.w - pad &&
-        y >= ARENA.y + pad &&
-        y <= ARENA.y + ARENA.h - pad
-      );
-    }
-
-    function updateBatSwarms(dt) {
-      if (gameOver) return;
-      for (let i = batSwarms.length - 1; i >= 0; i--) {
-        const swarm = batSwarms[i];
-        if (!swarm.active) {
-          batSwarms.splice(i, 1);
-          continue;
-        }
-
-        swarm.life -= dt * 1000;
-        if (swarm.life <= 0) {
-          swarm.active = false;
-          continue;
-        }
-
-        const nextX = swarm.x + swarm.vx * dt;
-        const nextY = swarm.y + swarm.vy * dt;
-        const pad = ABILITY.vampireBatSwarmHitRadius * 0.35;
-
-        if (!isBatSwarmInsideArena(nextX, nextY, pad)) {
-          if (swarm.fromBall && swarm.fromBall.hp > 0) {
-            teleportVampireFromBatSwarm(swarm.fromBall, swarm.lastValidX, swarm.lastValidY);
-          }
-          swarm.active = false;
-          continue;
-        }
-
-        swarm.trail.push({ x: swarm.x, y: swarm.y });
-        if (swarm.trail.length > 5) swarm.trail.shift();
-        swarm.x = nextX;
-        swarm.y = nextY;
-        swarm.lastValidX = swarm.x;
-        swarm.lastValidY = swarm.y;
-        swarm.phase += dt * 12;
-
-        const opponent = balls.find((b) => b !== swarm.fromBall);
-        if (!swarm.hit && opponent && opponent.hp > 0 && swarm.fromBall) {
-          const hitDist = opponent.radius + ABILITY.vampireBatSwarmHitRadius;
-          if (Math.hypot(opponent.x - swarm.x, opponent.y - swarm.y) <= hitDist) {
-            swarm.hit = true;
-            const actual = applyDamage(opponent, swarm.fromBall, ABILITY.vampireBatSwarmDamage);
-            if (actual > 0) applyBatSwarmHeal(swarm.fromBall, actual);
-            spawnImpactFlash(opponent.x, opponent.y, 26, "#6c1d45");
-          }
-        }
-      }
-    }
-
-    function drawBatSwarmSilhouette(x, y, scale, wingPhase) {
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.scale(scale, scale);
-      const wing = Math.sin(wingPhase) * 0.35;
-      ctx.fillStyle = "#120818";
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.quadraticCurveTo(-10 - wing * 8, -4, -14, -2);
-      ctx.quadraticCurveTo(-8, 2, 0, 3);
-      ctx.quadraticCurveTo(8, 2, 14, -2);
-      ctx.quadraticCurveTo(10 + wing * 8, -4, 0, 0);
-      ctx.fill();
-      ctx.fillStyle = "#2a1038";
-      ctx.beginPath();
-      ctx.arc(0, 1, 2.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    function drawBatSwarms() {
-      for (const swarm of batSwarms) {
-        if (!swarm.active) continue;
-
-        if (swarm.trail.length > 1) {
-          ctx.save();
-          ctx.strokeStyle = "rgba(40, 10, 55, 0.35)";
-          ctx.lineWidth = 5;
-          ctx.lineCap = "round";
-          ctx.beginPath();
-          ctx.moveTo(swarm.trail[0].x, swarm.trail[0].y);
-          for (let i = 1; i < swarm.trail.length; i++) {
-            ctx.lineTo(swarm.trail[i].x, swarm.trail[i].y);
-          }
-          ctx.stroke();
-          ctx.restore();
-        }
-
-        ctx.save();
-        ctx.globalAlpha = 0.82;
-        ctx.fillStyle = "rgba(30, 8, 45, 0.45)";
-        ctx.beginPath();
-        ctx.arc(swarm.x, swarm.y, ABILITY.vampireBatSwarmHitRadius * 0.55, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-
-        const offsets = [
-          { ox: 0, oy: 0, s: 1.1 },
-          { ox: -10, oy: 4, s: 0.85 },
-          { ox: 10, oy: 3, s: 0.9 },
-          { ox: -5, oy: -8, s: 0.75 },
-          { ox: 7, oy: -6, s: 0.8 }
-        ];
-        for (let i = 0; i < offsets.length; i++) {
-          const o = offsets[i];
-          drawBatSwarmSilhouette(swarm.x + o.ox, swarm.y + o.oy, o.s, swarm.phase + i * 0.7);
-        }
-        ctx.restore();
-      }
-    }
-
-    function drawVampireTeleportSmokes(dt) {
-      for (let i = vampireTeleportSmokes.length - 1; i >= 0; i--) {
-        const s = vampireTeleportSmokes[i];
-        s.life -= dt * 1000;
-        s.x += s.vx * dt;
-        s.y += s.vy * dt;
-        s.alpha = clamp(s.life / 320, 0, 1);
-        ctx.save();
-        ctx.globalAlpha = s.alpha * 0.75;
-        ctx.fillStyle = "#6c1d45";
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "rgba(20, 5, 30, 0.55)";
-        ctx.beginPath();
-        ctx.arc(s.x, s.y + s.size * 0.35, s.size * 0.7, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-        if (s.life <= 0) vampireTeleportSmokes.splice(i, 1);
-      }
     }
 
     function startNinjaDash(ninja, opponent) {
@@ -2316,11 +2081,6 @@
         this.bloodDashActive = false;
         this.bloodDashTimeLeft = 0;
         this.bloodDashHit = false;
-        this.batSwarmTimer = config.ability === "vampire"
-          ? (config.secondaryAbilityCooldown ?? ABILITY.vampireBatSwarmInterval)
-          : 0;
-        this.batSwarmCooldown = config.secondaryAbilityCooldown ?? ABILITY.vampireBatSwarmInterval;
-        this.teleportCollisionSafety = 0;
         this.awakenedEyeTimeLeft = 0;
         this.paralyzedTimeLeft = 0;
         this.savedVx = 0;
@@ -2584,19 +2344,6 @@
             const opponent = balls.find((b) => b !== this);
             if (opponent) startVampireDash(this, opponent);
             spawnTextEffect(this.x, this.y - this.radius - 40, "BLOOD DASH!", "#c0392b", 34);
-          }
-
-          this.batSwarmTimer -= dt * 1000;
-          if (this.batSwarmTimer <= 0) {
-            this.batSwarmTimer = this.batSwarmCooldown || ABILITY.vampireBatSwarmInterval;
-            const opponent = balls.find((b) => b !== this);
-            if (opponent) spawnBatSwarm(this, opponent);
-            spawnTextEffect(this.x, this.y - this.radius - 40, "BAT SWARM!", "#6c1d45", 32);
-          }
-
-          if (this.teleportCollisionSafety > 0) {
-            this.teleportCollisionSafety -= dt * 1000;
-            if (this.teleportCollisionSafety < 0) this.teleportCollisionSafety = 0;
           }
         }
 
@@ -3364,7 +3111,6 @@
         weaponOffsetY: char.weaponOffsetY,
         ability: char.abilityType === "ironMining" ? "ironMining" : char.abilityType === "archer" ? "archer" : char.abilityType === "scissorhands" ? "scissorhands" : char.abilityType === "paladin" ? "paladin" : char.abilityType === "ninja" ? "ninja" : char.abilityType === "frost" ? "frost" : char.abilityType === "bomber" ? "bomber" : char.abilityType === "lancer" ? "lancer" : char.abilityType === "vampire" ? "vampire" : "normal",
         abilityCooldown: char.abilityType === "paladin" ? (char.abilityCooldown || ABILITY.paladinInterval) : char.abilityType === "scissorhands" ? (char.abilityCooldown || ABILITY.scissorInterval) : char.abilityType === "ninja" ? (char.abilityCooldown || ABILITY.ninjaInterval) : char.abilityType === "frost" ? (char.abilityCooldown || ABILITY.frostInterval) : char.abilityType === "bomber" ? (char.abilityCooldown || ABILITY.bomberInterval) : char.abilityType === "lancer" ? (char.abilityCooldown || ABILITY.lancerInterval) : char.abilityType === "vampire" ? (char.abilityCooldown || ABILITY.vampireInterval) : char.abilityCooldown || ABILITY.ironMiningInterval,
-        secondaryAbilityCooldown: char.secondaryAbilityCooldown,
         baseDamage: char.baseDamage,
         abilityDamage: char.abilityDamage,
         meleeDamage: char.meleeDamage,
@@ -3539,12 +3285,12 @@
       const midY = (a.y + b.y) / 2;
 
       if (a.collisionCooldown <= 0 && b.collisionCooldown <= 0) {
-          if (!(a.ability === "ninja" && a.shadowDashActive) && !(a.ability === "vampire" && a.bloodDashActive) && !(a.ability === "vampire" && a.teleportCollisionSafety > 0)) {
+          if (!(a.ability === "ninja" && a.shadowDashActive) && !(a.ability === "vampire" && a.bloodDashActive)) {
             applyDamage(b, a, getAttackDamage(a, b), {
               lifesteal: a.ability === "scissorhands" && a.scissorActive
             });
           }
-          if (!(b.ability === "ninja" && b.shadowDashActive) && !(b.ability === "vampire" && b.bloodDashActive) && !(b.ability === "vampire" && b.teleportCollisionSafety > 0)) {
+          if (!(b.ability === "ninja" && b.shadowDashActive) && !(b.ability === "vampire" && b.bloodDashActive)) {
             applyDamage(a, b, getAttackDamage(b, a), {
               lifesteal: b.ability === "scissorhands" && b.scissorActive
             });
@@ -3577,8 +3323,6 @@
       slashEffects = [];
       ninjaAfterimages = [];
       vampireAfterimages = [];
-      batSwarms = [];
-      vampireTeleportSmokes = [];
       bomberBurstEffects = [];
       bombExplosionEffects = [];
       gameOver = false;
@@ -3632,26 +3376,6 @@
         drawOutlinedText("VS", W / 2, 210, "#666", COLORS.black, 3);
         drawFittedOutlinedText(p2Label, W / 2 + 210, 210, 360, 34, family, blueBall.color, "left");
       }
-    }
-
-    function getAbilityCooldownStates(ball) {
-      if (ball.ability === "vampire") {
-        return [
-          {
-            ready: ball.abilityTimer <= 0 && !ball.bloodDashActive,
-            remainingMs: Math.max(0, ball.abilityTimer),
-            totalMs: ball.abilityCooldown || ABILITY.vampireInterval,
-            icon: "vampire"
-          },
-          {
-            ready: ball.batSwarmTimer <= 0,
-            remainingMs: Math.max(0, ball.batSwarmTimer),
-            totalMs: ball.batSwarmCooldown || ABILITY.vampireBatSwarmInterval,
-            icon: "batSwarm"
-          }
-        ];
-      }
-      return [getAbilityCooldownState(ball)];
     }
 
     function getAbilityCooldownState(ball) {
@@ -3728,48 +3452,6 @@
         };
       }
       return { ready: true, remainingMs: 0, totalMs: 0, icon: "stick" };
-    }
-
-    function drawAbilityCooldownIconState(state, boxX, boxY, boxSize) {
-      ctx.save();
-      ctx.fillStyle = state.ready ? "#2a2a2a" : "#1a1a1a";
-      ctx.strokeStyle = state.ready ? "#ffd700" : "#555";
-      ctx.lineWidth = state.ready ? 3 : 2;
-      ctx.fillRect(boxX, boxY, boxSize, boxSize);
-      ctx.strokeRect(boxX, boxY, boxSize, boxSize);
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(boxX + 2, boxY + 2, boxSize - 4, boxSize - 4);
-      ctx.clip();
-      drawSkillIconGlyph(state.icon, boxX + boxSize / 2, boxY + boxSize / 2, boxSize);
-      ctx.restore();
-
-      if (!state.ready && state.totalMs > 0) {
-        ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-        ctx.fillRect(boxX, boxY, boxSize, boxSize);
-        const secs = Math.ceil(state.remainingMs / 1000);
-        ctx.fillStyle = "#fff";
-        ctx.strokeStyle = COLORS.black;
-        ctx.lineWidth = 3;
-        ctx.font = "bold 22px Courier New, monospace";
-        ctx.textAlign = "center";
-        ctx.strokeText(String(secs), boxX + boxSize / 2, boxY + boxSize / 2 + 8);
-        ctx.fillText(String(secs), boxX + boxSize / 2, boxY + boxSize / 2 + 8);
-      }
-      ctx.restore();
-    }
-
-    function drawAbilityCooldownIcons(ball, baseX, boxY, boxSize, isLeft) {
-      const states = getAbilityCooldownStates(ball);
-      const iconGap = 4;
-      const totalWidth = states.length * boxSize + (states.length - 1) * iconGap;
-      const startX = isLeft ? baseX : baseX - totalWidth;
-      for (let i = 0; i < states.length; i++) {
-        const iconX = isLeft
-          ? startX + i * (boxSize + iconGap)
-          : startX + (states.length - 1 - i) * (boxSize + iconGap);
-        drawAbilityCooldownIconState(states[i], iconX, boxY, boxSize);
-      }
     }
 
     function drawSkillIconGlyph(icon, cx, cy, size) {
@@ -3902,19 +3584,6 @@
         ctx.beginPath();
         ctx.arc(0, s * 0.28, s * 0.1, 0, Math.PI * 2);
         ctx.fill();
-      } else if (icon === "batSwarm") {
-        ctx.fillStyle = "#120818";
-        ctx.beginPath();
-        ctx.moveTo(0, s * 0.05);
-        ctx.quadraticCurveTo(-s * 0.42, -s * 0.08, -s * 0.55, s * 0.02);
-        ctx.quadraticCurveTo(-s * 0.28, s * 0.18, 0, s * 0.12);
-        ctx.quadraticCurveTo(s * 0.28, s * 0.18, s * 0.55, s * 0.02);
-        ctx.quadraticCurveTo(s * 0.42, -s * 0.08, 0, s * 0.05);
-        ctx.fill();
-        ctx.fillStyle = "#6c1d45";
-        ctx.beginPath();
-        ctx.arc(0, s * 0.08, s * 0.07, 0, Math.PI * 2);
-        ctx.fill();
       } else {
         ctx.strokeStyle = "#5c3a1e";
         ctx.lineWidth = 3;
@@ -3927,7 +3596,33 @@
     }
 
     function drawAbilityCooldownIcon(ball, boxX, boxY, boxSize, isLeft) {
-      drawAbilityCooldownIcons(ball, isLeft ? boxX : boxX + boxSize, boxY, boxSize, isLeft);
+      const state = getAbilityCooldownState(ball);
+      ctx.save();
+      ctx.fillStyle = state.ready ? "#2a2a2a" : "#1a1a1a";
+      ctx.strokeStyle = state.ready ? "#ffd700" : "#555";
+      ctx.lineWidth = state.ready ? 3 : 2;
+      ctx.fillRect(boxX, boxY, boxSize, boxSize);
+      ctx.strokeRect(boxX, boxY, boxSize, boxSize);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(boxX + 2, boxY + 2, boxSize - 4, boxSize - 4);
+      ctx.clip();
+      drawSkillIconGlyph(state.icon, boxX + boxSize / 2, boxY + boxSize / 2, boxSize);
+      ctx.restore();
+
+      if (!state.ready && state.totalMs > 0) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+        ctx.fillRect(boxX, boxY, boxSize, boxSize);
+        const secs = Math.ceil(state.remainingMs / 1000);
+        ctx.fillStyle = "#fff";
+        ctx.strokeStyle = COLORS.black;
+        ctx.lineWidth = 3;
+        ctx.font = "bold 22px Courier New, monospace";
+        ctx.textAlign = "center";
+        ctx.strokeText(String(secs), boxX + boxSize / 2, boxY + boxSize / 2 + 8);
+        ctx.fillText(String(secs), boxX + boxSize / 2, boxY + boxSize / 2 + 8);
+      }
+      ctx.restore();
     }
 
     function drawHpBar() {
@@ -4000,8 +3695,8 @@
 
       const iconSize = 36;
       const iconY = barY + barH + 56;
-      const iconBaseX = isLeft ? x : x + barW;
-      drawAbilityCooldownIcons(ball, iconBaseX, iconY, iconSize, isLeft);
+      const iconX = isLeft ? x : x + barW - iconSize;
+      drawAbilityCooldownIcon(ball, iconX, iconY, iconSize, isLeft);
     }
 
     function drawDamageNumbers(dt) {
@@ -4209,7 +3904,6 @@
         updateIcePrisons(dt);
         updateTimeBombs(dt);
         updateFrostAuras(dt);
-        updateBatSwarms(dt);
         checkBattleEnd();
       }
 
@@ -4223,13 +3917,10 @@
       drawIcePrisons();
       drawNinjaAfterimages(dt);
       drawVampireAfterimages(dt);
-      drawVampireTeleportSmokes(dt);
 
       for (const ball of balls) {
         ball.draw();
       }
-
-      drawBatSwarms();
 
       drawTimeBombs(dt);
       drawBombExplosionEffects(dt);
